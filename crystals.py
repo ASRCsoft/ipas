@@ -1,7 +1,6 @@
 # do crystal things!
 
-import math
-import copy as cp
+import random
 import numpy as np
 import shapely.geometry as geom
 import shapely.ops as shops
@@ -12,12 +11,11 @@ class IceCrystal:
         self.length = length
         self.width = width
         self.center = [0, 0, 0] # start the crystal at the origin
-        self.rotation = [0, 0, 0] # the crystal starts with no rotation
 
         # put together the hexagonal prism
         ca = self.length # c axis length
         mf = self.width # maximum face dimension
-        f = math.sqrt(3) / 4 # convenient number for hexagons
+        f = np.sqrt(3) / 4 # convenient number for hexagons
         x1 = ca / 2
         self.points = np.array([(x1, -mf / 4, mf * f), (x1, mf / 4, mf * f),
                                 (x1, mf / 2, 0), (x1, mf / 4, -mf * f),
@@ -32,7 +30,8 @@ class IceCrystal:
         #          [-mf/4. ,mf/4.  ,mf/2. ,mf/4. ,-mf/4. ,-mf/2. ,-mf/4. ,mf/4.  ,mf/2.  ,mf/4.  ,-mf/4. ,-mf/2.],$
         #          [mf*f   ,mf*f   ,0.    ,-mf*f ,-mf*f  ,0.     ,mf*f   ,mf*f   ,0.     ,-mf*f  ,-mf*f  ,0.]]
 
-        self.rotate(rotation) # rotate the crystal
+        self._rotate(rotation) # rotate the crystal
+        self.rotation = rotation
         self.move(center) # move the crystal
         self.maxz = self.points['z'].max()
         self.minz = self.points['z'].min()
@@ -48,7 +47,7 @@ class IceCrystal:
         self.maxz += xyz[2]
         self.minz += xyz[2]
 
-    def rotate(self, angles):
+    def _rotate(self, angles):
         # do the new rotation:
         [x, y, z] = [self.points['x'], self.points['y'], self.points['z']]
         [y, z] = [y * np.cos(angles[0]) - z * np.sin(angles[0]), y * np.sin(angles[0]) + z * np.cos(angles[0])]
@@ -73,7 +72,8 @@ class IceCrystal:
         # pt1r3=[pt1r2(0)*cos(angle(2))-pt1r2(1)*sin(angle(2)),pt1r2(0)*sin(angle(2))+pt1r2(1)*cos(angle(2)),pt1r2(2)]
 
     def _rev_rotate(self, angles):
-        # undo a rotation (same as above but in reverse order):
+        # undo a rotation (same as above but in negative and in reverse order):
+        angles = [-x for x in angles ]
         [x, y, z] = [self.points['x'], self.points['y'], self.points['z']]
         [x, y] = [x * np.cos(angles[2]) - y * np.sin(angles[2]), x * np.sin(angles[2]) + y * np.cos(angles[2])]
         [x, z] = [x * np.cos(angles[1]) + z * np.sin(angles[1]), -x * np.sin(angles[1]) + z * np.cos(angles[1])]
@@ -93,18 +93,47 @@ class IceCrystal:
         self.center[1] = (y.max() + y.min()) / 2
         self.center[2] = (self.maxz + self.minz) / 2
 
-    # def rotate_mat(self, mat):
-    #     # rotate using a rotation matrix
-    #     for n in range(12):
-    #         #return tuple(np.dot(mat, list(self.points[n])))
-    #         self.points[n] = tuple(np.squeeze(np.asarray(np.dot(mat, list(self.points[n])))))
+    def rotate_to(self, angles):
+        # rotate to the orientation given by the 3 angles
 
-    #     # update crystal info
-    #     self.maxz = self.points['z'].max()
-    #     self.minz = self.points['z'].min()
-    #     self.center[0] = (self.points['x'].max() + self.points['x'].min()) / 2
-    #     self.center[1] = (self.points['y'].max() + self.points['y'].min()) / 2
-    #     self.center[2] = (self.maxz + self.minz) / 2
+        # first undo the current rotation
+        self._rev_rotate(self.rotation)
+
+        # now do the new rotation
+        self._rotate(angles)
+
+    def reorient(self, method='schmitt', random_rotations=50):
+        if method == 'schmitt':
+            max_area = self.projectxy().area
+            max_rot1 = None
+            for i in range(random_rotations):
+                [a, b, c] = [random.uniform(0, np.pi), random.uniform(0, np.pi), random.uniform(0, np.pi)]
+                # for mysterious reasons we are going to rotate this 3 times
+                rot1 = [a, b, c]
+                rot2 = [b * np.pi, c * np.pi, a * np.pi]
+                rot3 = [c * np.pi / 2, a * np.pi / 2, b * np.pi / 2]
+                self.rotate_to(rot1)
+                self._rotate(rot2)
+                self._rotate(rot3)
+                new_area = self.projectxy().area
+                if new_area > max_area:
+                    max_area = new_area
+                    max_area = new_area
+                    max_rot1 = rot1
+                    max_rot2 = rot2
+                    max_rot3 = rot3
+                # now rotate back -- this is fun!
+                self._rev_rotate(rot3)
+                self._rev_rotate(rot2)
+                self._rev_rotate(rot1)
+            # rotate new crystal to the area-maximizing rotation(s)
+            if max_rot1 is not None:
+                self.rotate_to(max_rot1)
+                self._rotate(max_rot2)
+                self._rotate(max_rot3)
+                # if none of the new rotations was better we can leave
+                # it at the original rotation
+            self.rotation = [0, 0, 0]
 
     def plot(self):
         # return a multiline object representing the edges of the prism
@@ -278,9 +307,11 @@ class IceCrystal:
         # find the minimum directed distance to crystal2 traveling straight downward
 
         rel_area = self.projectxy().intersection(crystal2.projectxy())
+        if not isinstance(rel_area, geom.Polygon):
+            return None
         c1_bottom = self.bottom()
         c2_top = crystal2.top()
-        mindiffz = 1000
+        mindiffz = self.maxz - crystal2.minz
 
         # 1) lines and lines
         # all the intersections are calculated in 2d so no need to
@@ -344,7 +375,7 @@ class IceCrystal:
             for face in c1_faces:
                 if point.intersects(face):
                     # get z difference
-                    z1 = point.z
+                    z2 = point.z # z2 this time!!!
                     # find the equation of the polygon's plane, plug in xy
                     a = np.array(face.exterior.coords[0])
                     AB = np.array(face.exterior.coords[1]) - a
@@ -352,7 +383,7 @@ class IceCrystal:
                     normal_vec = np.cross(AB, AC)
                     # find constant value
                     d = -np.dot(normal_vec, a)
-                    z2 = -(point.x * normal_vec[0] + point.y * normal_vec[1] + d) / normal_vec[2]
+                    z1 = -(point.x * normal_vec[0] + point.y * normal_vec[1] + d) / normal_vec[2]
                     diffz = z1 - z2
                     if diffz < mindiffz:
                         mindiffz = diffz
@@ -389,56 +420,31 @@ class IceCluster:
 
     def move(self, xyz):
         # move the entire cluster
-        self.points[0] += xyz[0]
-        self.points[1] += xyz[1]
-        self.points[2] += xyz[2]
-        # for crystal in self.crystals:
-        #     crystal.move(xyz)
+        # self.points[0] += xyz[0]
+        # self.points[1] += xyz[1]
+        # self.points[2] += xyz[2]
+        for crystal in self.crystals:
+            crystal.move(xyz)
 
-    # def rotate(self, angles, matrix=False):
-    #     # rotate the entire cluster
+    def _rotate(self, angles):
+        for crystal in self.crystals:
+            crystal._rotate(angles)
 
-    #     # matrix for the new rotation
-    #     nrx = np.matrix([[1, 0, 0], [0, np.cos(angles[0]), -np.sin(angles[0])], [0, np.sin(angles[0]), np.cos(angles[0])]])
-    #     nry = np.matrix([[np.cos(angles[1]), 0, np.sin(angles[1])], [0, 1, 0], [-np.sin(angles[1]), 0, np.cos(angles[1])]])
-    #     nrz = np.matrix([[np.cos(angles[2]), -np.sin(angles[2]), 0], [np.sin(angles[2]), np.cos(angles[2]), 0], [0, 0, 1]])
-    #     new_matrix = nrx.dot(nry).dot(nrz)
+    def _rev_rotate(self, angles):
+        # get back to the original rotation
+        for crystal in self.crystals:
+            crystal._rev_rotate(angles)
 
-    #     # first make a rotation matrix to undo the current rotation
-    #     # (unless there is no rotation to undo)
-    #     if any(self.rotation):
-    #         angles0 = self.rotation
-    #         crx = np.matrix([[1, 0, 0], [0, np.cos(angles0[0]), -np.sin(angles0[0])], [0, np.sin(angles0[0]), np.cos(angles0[0])]])
-    #         cry = np.matrix([[np.cos(angles0[1]), 0, np.sin(angles0[1])], [0, 1, 0], [-np.sin(angles0[1]), 0, np.cos(angles0[1])]])
-    #         crz = np.matrix([[np.cos(angles0[2]), -np.sin(angles0[2]), 0], [np.sin(angles0[2]), np.cos(angles0[2]), 0], [0, 0, 1]])
-    #         current_matrix = crx.dot(cry).dot(crz)
-
-    #         # get the matrix for the total rotation
-    #         total_matrix = np.linalg.pinv(current_matrix).dot(new_matrix)
-    #     else:
-    #         total_matrix = new_matrix
-
-    #     if matrix:
-    #         return total_matrix
-
-    #     #return total_matrix
-        
-    #     for crystal in self.crystals:
-    #         crystal.rotate_mat(total_matrix)
-    #     self.rotation = angles
-
-    def rotate(self, angles, matrix=False):
+    def rotate_to(self, angles):
         # rotate the entire cluster
 
         # first get back to the original rotation
-        inverse_rotation = [ -x for x in self.rotation ]
-        for crystal in self.crystals:
-            crystal._rev_rotate(inverse_rotation)
+        self._rev_rotate(self.rotation)
 
         # now add the new rotation
-        for crystal in self.crystals:
-            crystal.rotate(angles)
-            
+        self._rotate(angles)
+
+        # save the new rotation
         self.rotation = angles
 
     def center_of_mass(self):
@@ -446,22 +452,6 @@ class IceCluster:
         y = np.mean([ x.center[1] for x in self.crystals ])
         z = np.mean([ x.center[2] for x in self.crystals ])
         return [x, y, z]
-        # return np.mean(self.points)
-
-    # def _plot_one(self, i):
-    #     # return a multiline object representing the edges of the prism
-    #     lines = []
-    #     hex1 = self.points[:, 0:6, i]
-    #     hex2 = self.points[:, 6:12, i]
-    #     # make the lines representing each hexagon
-    #     for hex0 in [hex1, hex2]:
-    #         # gotta fix this line
-    #         lines.append(geom.LinearRing(list(hex0)))
-    #         # make the lines connecting the two hexagons
-    #     for n in range(6):
-    #         lines.append(geom.LineString([hex1[n], hex2[n]]))
-
-    #     return geom.MultiLineString(lines)
 
     def plot(self):
         return geom.MultiLineString([ lines for crystal in self.crystals for lines in crystal.plot() ])
@@ -471,7 +461,7 @@ class IceCluster:
         polygons = [ crystal.projectxy() for crystal in self.crystals ]
         return shops.cascaded_union(polygons)
 
-    def add_crystal_from_above(self, crystal):
+    def add_crystal_from_above(self, crystal, lodge=0):
         # drop a new crystal onto the cluster
 
         # first see which other crystals intersect with the new one in
@@ -483,15 +473,15 @@ class IceCluster:
         
         # we know highest hit is >= max(minzs), therefore the first
         # hit can't be below (max(minzs) - height(crystal))
-        minzs = [ crystal.minz for crystal in close_crystals ]
+        minzs = [ crystal2.minz for crystal2 in close_crystals ]
         first_hit_lower_bound = max(minzs) - (crystal.maxz - crystal.minz)
         # remove the low crystals, sort from highest to lowest
         close_crystals = [ x for x in close_crystals if x.maxz > first_hit_lower_bound ]
         close_crystals.sort(key=lambda x: x.maxz, reverse=True)
 
         # look to see where the new crystal hits the old ones
-        mindiffz = 9999
-        for i, crystal2 in enumerate(close_crystals):
+        mindiffz = crystal.maxz - first_hit_lower_bound
+        for crystal2 in close_crystals:
             if first_hit_lower_bound > crystal2.maxz:
                 break # stop looping if the rest of the crystals are too low
             diffz = crystal.min_vert_dist(crystal2)
@@ -501,13 +491,46 @@ class IceCluster:
                 mindiffz = diffz
                 first_hit_lower_bound = crystal.minz - mindiffz
         # take the highest hit, move the crystal to that level
-        crystal.move([0, 0, -mindiffz])
+        crystal.move([0, 0, -mindiffz - lodge])
 
         # append new crystal to list of crystals
         self.crystals.append(crystal)
         
         # fin.
         return True
+
+    def reorient(self, method='schmitt', random_rotations=50):
+        if method == 'schmitt':
+            max_rot1 = None
+            max_area = self.projectxy().area
+            for i in range(random_rotations):
+                [a, b, c] = [random.uniform(0, np.pi / 4), random.uniform(0, np.pi / 4), random.uniform(0, np.pi / 4)]
+                # for mysterious reasons we are going to rotate this 3 times
+                rot1 = [a, b, c]
+                rot2 = [b * np.pi, c * np.pi, a * np.pi]
+                rot3 = [c * np.pi / 2, a * np.pi / 2, b * np.pi / 2]
+                self.rotate_to(rot1)
+                self._rotate(rot2)
+                self._rotate(rot3)
+                new_area = self.projectxy().area
+                if new_area > max_area:
+                    max_area = new_area
+                    max_rot1 = rot1
+                    max_rot2 = rot2
+                    max_rot3 = rot3
+                # now rotate back -- this is fun!
+                self._rev_rotate(rot3)
+                self._rev_rotate(rot2)
+                self._rev_rotate(rot1)
+                
+            # rotate new crystal to the area-maximizing rotation(s)
+            if max_rot1 is not None:
+                self.rotate_to(max_rot1)
+                self._rotate(max_rot2)
+                self._rotate(max_rot3)
+                # if none of the new rotations was better we can leave
+                # it at the original rotation
+            self.rotation = [0, 0, 0]
 
     def _get_slice_x(self, p1, p2):
         # if the area goes up along the y-axis, we will have to
@@ -544,38 +567,48 @@ class IceCluster:
         return abs(main_chunk + small_chunk)
 
     def _get_slice_xy(self, p1, p2):
-        # getting the integral of x*y over a slice of area
-        x1 = p1[0]
-        x2 = p2[0]
-        if (x1 / abs(x1)) != (x2 / abs(x2)):
-            # if the area goes up along the y-axis, transpose x and y
-            # (we can do that because x and y are interchangeable in
-            # these calculations)
-            p1.reverse()
-            p2.reverse()
-            x1 = p1[0]
-            x2 = p2[0]
-        # get the slopes from the origin to the points
-        y1 = p1[1]
-        y2 = p2[1]
-        m1 = y1 / x1
-        m2 = y2 / x2
-        # get the integral of the main chunk
-        main_chunk = (m2 ** 2 - m1 ** 2) * x2 ** 4 / 8
-        x_range = x1 - x2
-        if x_range != 0:
-            m3 = (y2 - y1) / x_range
-            b = -m3 * x2 + y2
-            small_chunk = (x1 ** 4 - x2 ** 4) * (m3 ** 2 - m1 ** 2) / 8 +\
-                          b * m3 * (x1 ** 3 - x2 ** 3) / 3 +\
-                          b ** 2 * (x1 ** 2 - x2 ** 2) / 4
+        # figure out which point is in the middle
+        points = [p1, p2, [0, 0]]
+        xs = [ p[0] for p in points]
+        xorder = np.argsort(xs)
+        # the coordinates of the left, middle, and right points,
+        # respectively
+        [xl, yl] = points[xorder[0]]
+        [xm, ym] = points[xorder[1]]
+        [xr, yr] = points[xorder[2]]
+        # slope of the line connecting the left and right points
+        m3 = (yr - yl) / (xr - xl)
+        b3 = -xl * m3 + yl
+        # the y coordinate of the line connecting the left and right
+        # points at the x position of the middle point
+        m3_mid = yl + m3 * (xm - xl)
+        # is the midpoint above or below that line?
+        mid_above = ym > m3_mid
+        # Writing this integral assuming the midpoint is above the
+        # other points. If it's not then I have to flip the sign.
+        if xm != xl:
+            m1 = (ym - yl) / (xm - xl)
+            b1 = -xl * m1 + yl
+            leftside1 = (xm ** 4 - xl ** 4) * (m1 ** 2 - m3 ** 2) / 8
+            leftside2 = (xm ** 3 - xl ** 3) * (b1 * m1 - b3 * m3) / 3
+            leftside3 = (xm ** 2 - xl ** 2) * (b1 ** 2 - b3 ** 2) / 4
+            leftside = leftside1 + leftside2 + leftside3
         else:
-            small_chunk = 0
-        if x2 < 0 and x1 < 0:
-            main_chunk = -main_chunk
-            small_chunk = -small_chunk
-            
-        return -(main_chunk + small_chunk)
+            leftside = 0
+        if xm != xr:
+            m2 = (yr - ym) / (xr - xm)
+            b2 = -xr * m2 + yr
+            rightside1 = (xr ** 4 - xm ** 4) * (m2 ** 2 - m3 ** 2) / 8
+            rightside2 = (xr ** 3 - xm ** 3) * (b2 * m2 - b3 * m3) / 3
+            rightside3 = (xr ** 2 - xm ** 2) * (b2 ** 2 - b3 ** 2) / 4
+            rightside = rightside1 + rightside2 + rightside3
+        else:
+            rightside = 0
+
+        if mid_above:
+            return leftside + rightside
+        else:
+            return -(leftside + rightside)
 
     def _get_moments(self, poly):
         # get 'mass' moments for this polygon
@@ -585,6 +618,9 @@ class IceCluster:
         xtotal = 0
         ytotal = 0
         xytotal = 0
+        # the shapely polygons end with a copy of the first point, so
+        # this completes the loop even though it only goes to
+        # npoints-1
         for n in range(npoints - 1):
             p1 = list(points[n])
             p2 = list(points[n + 1])
@@ -600,47 +636,99 @@ class IceCluster:
             # instead of writing a y-specific function I'm just going
             # to transpose x and y whoa mind blown man
             ytotal += c * self._get_slice_x(list(reversed(p1)), list(reversed(p2)))
-            xytotal += c * self._get_slice_xy(p1, p2)
-        # one more
-        p1 = list(points[npoints - 1])
-        p2 = list(points[0])
-        c = np.cross(p1, p2) > 0
-        xtotal += c * self._get_slice_x(p1, p2)
-        ytotal += c * self._get_slice_x(list(reversed(p1)), list(reversed(p2)))
-        xytotal += c * self._get_slice_xy(p1, p2)
+            xytotal -= c * self._get_slice_xy(p1, p2)
         # now loop through the holes as needed, subtract areas
         for linestring in list(poly.interiors):
             poly2 = geom.Polygon(linestring)
+            # see if the polygon points are listed clockwise or
+            # counterclockwise
+            areas = []
+            points = list(poly2.exterior.coords)
+            for n in range(len(points) - 1):
+                areas.append(np.cross(points[n], points[n+1]))
+            clockwise = np.sum(areas) < 0
+            if clockwise:
+                c = -1
+            else:
+                c = 1
             # whoa recursion mind blown man
             minus_moments = self._get_moments(poly2)
             xtotal -= minus_moments[0]
             ytotal -= minus_moments[1]
-            xytotal -= minus_moments[2]
+            xytotal -= c * minus_moments[2]
 
-        return [abs(xtotal), abs(ytotal), abs(xytotal)]
+        return [abs(xtotal), abs(ytotal), xytotal]
 
     def fit_ellipse(self):
-        # emulating this function, but for polygons:
+        # Emulating this function, but for polygons in continuous
+        # space rather than blobs in discrete space:
         # http://www.idlcoyote.com/ip_tips/fit_ellipse.html
+        # Using a variation of the shoelace formula to calculate mass
+        # moments for complicated polygons, integrating one triangular
+        # slice at a time.
         poly = self.projectxy()
         xy_area = poly.area
         
         # temporarily center the cluster around the centroid
-        # omg shapely can get the centroid thank goodness
         centroid = poly.centroid
         poly = sha.translate(poly, -centroid.x, -centroid.y)
 
-        moments = self._get_moments(poly)
-        # I might get the wrong sign so make sure it's positive
-        x = moments[0] / xy_area
-        y = moments[1] / xy_area
-        xy = moments[2] / xy_area
+        # # see if the polygon points are listed clockwise or
+        # # counterclockwise
+        # areas = []
+        # points = list(poly.exterior.coords)
+        # for n in range(len(points) - 1):
+        #     areas.append(np.cross(points[n], points[n+1]))
+        # clockwise = np.sum(areas) < 0
+        # if clockwise:
+        #     c = 1
+        # else:
+        #     c = -1
+
+        # if poly is actually a multipolygon, have to do a bit more
+        # work
+        if isinstance(poly, geom.multipolygon.MultiPolygon):
+            x = 0
+            y = 0
+            xy = 0
+            for poly2 in poly:
+                # see if the polygon points are listed clockwise or
+                # counterclockwise
+                areas = []
+                points = list(poly2.exterior.coords)
+                for n in range(len(points) - 1):
+                    areas.append(np.cross(points[n], points[n+1]))
+                clockwise = np.sum(areas) < 0
+                if clockwise:
+                    c = -1
+                else:
+                    c = 1
+                moments = self._get_moments(poly2)
+                x += moments[0] / xy_area
+                y += moments[1] / xy_area
+                xy += c * (moments[2] / xy_area)
+        else:
+            # see if the polygon points are listed clockwise or
+            # counterclockwise
+            areas = []
+            points = list(poly.exterior.coords)
+            for n in range(len(points) - 1):
+                areas.append(np.cross(points[n], points[n+1]))
+            clockwise = np.sum(areas) < 0
+            if clockwise:
+                c = -1
+            else:
+                c = 1
+            moments = self._get_moments(poly)
+            x = moments[0] / xy_area
+            y = moments[1] / xy_area
+            xy = c * (moments[2] / xy_area)
+            # the xy integral is calculated assuming the points are
+            # ordered counterclockwise, if not have to multiply by minus 1
 
         # do magic
         m = np.matrix([[y, xy], [xy, x]])
         evals, evecs = np.linalg.eigh(m)
-        # return evals
-        # return evecs
         semimajor = np.sqrt(evals[0]) * 2
         semiminor = np.sqrt(evals[1]) * 2
         major = semimajor * 2
@@ -648,7 +736,6 @@ class IceCluster:
         semiAxes = [semimajor, semiminor]
         axes = [major, minor]
         evec = np.squeeze(np.asarray(evecs[0]))
-        # orientation = -np.arctan(evec[1] / evec[0]) * 180 / np.pi
         orientation = np.arctan2(evec[1], evec[0]) * 180 / np.pi
 
         ellipse = {'xy': [centroid.x, centroid.y], 'width': minor,
@@ -660,8 +747,6 @@ class IceCluster:
         from matplotlib.patches import Ellipse
         # get the ellipse
         params = self.fit_ellipse()
-        # params['width'] = 2 * params['width']
-        # params['height'] = 2 * params['height']
         ellipse = Ellipse(**params)
         # get the polygon
         poly = self.projectxy()
@@ -669,8 +754,13 @@ class IceCluster:
         ax = fig.add_subplot(111)
         ax.add_artist(ellipse)
         ellipse.set_alpha(.5)
-        x, y = poly.exterior.xy
-        ax.plot(x, y)
+        if isinstance(poly, geom.multipolygon.MultiPolygon):
+            for poly2 in poly:
+                x, y = poly2.exterior.xy
+                ax.plot(x, y)
+        else:
+            x, y = poly.exterior.xy
+            ax.plot(x, y)
         maxdim = max([params['width'], params['height']])# / 2
         ax.set_xlim([-maxdim + params['xy'][0], maxdim + params['xy'][0]])
         ax.set_ylim([-maxdim + params['xy'][1], maxdim + params['xy'][1]])
@@ -696,3 +786,31 @@ class IceCluster:
             faces.append('f ' + ' '.join(map(str, coords)))
         f.write('\n'.join(faces))
         f.close()
+
+    def aspect_ratio(self, method):
+        rotation = self.rotation
+        
+        # getting ellipse axes from 3 perspectives
+        ellipse = {}
+        self.rotate_to([0, 0, 0])
+        ellipse['z'] = self.fit_ellipse()
+        self.rotate_to([np.pi / 2, 0, 0])
+        ellipse['y'] = self.fit_ellipse()
+        self.rotate_to([np.pi / 2, np.pi / 2, 0])
+        ellipse['x'] = self.fit_ellipse()
+        
+        # put the cluster back
+        self.rotate_to(rotation)
+
+        major_lengths = {}
+        minor_lengths = {}
+        for dim in ellipse.keys():
+            major_lengths[dim] = max(ellipse[dim]['height'], ellipse[dim]['width'])
+            minor_lengths[dim] = min(ellipse[dim]['height'], ellipse[dim]['width'])
+
+        if method == 1:
+            return max(major_lengths.values()) / max(minor_lengths.values())
+        elif method == 'plate':
+            return minor_lengths['y'] / major_lengths['z']
+        elif method == 'column':
+            return major_lengths['z'] / minor_lengths['y']
