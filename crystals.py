@@ -1,7 +1,7 @@
 # do crystal things!
 
-import random
 import numpy as np
+import scipy.optimize as opt
 import shapely.geometry as geom
 import shapely.ops as shops
 import shapely.affinity as sha
@@ -104,14 +104,15 @@ class IceCrystal:
 
     def reorient(self, method='schmitt', random_rotations=50):
         if method == 'schmitt':
+            # based on max_area2.pro from IPAS
             max_area = self.projectxy().area
             max_rot1 = None
             for i in range(random_rotations):
-                [a, b, c] = [random.uniform(0, np.pi), random.uniform(0, np.pi), random.uniform(0, np.pi)]
+                [a, b, c] = [np.random.uniform(high=np.pi), np.random.uniform(high=np.pi), np.random.uniform(high=np.pi)]
                 # for mysterious reasons we are going to rotate this 3 times
                 rot1 = [a, b, c]
                 rot2 = [b * np.pi, c * np.pi, a * np.pi]
-                rot3 = [c * np.pi / 2, a * np.pi / 2, b * np.pi / 2]
+                rot3 = [c * np.pi * 2, a * np.pi * 2, b * np.pi * 2]
                 self.rotate_to(rot1)
                 self._rotate(rot2)
                 self._rotate(rot3)
@@ -133,7 +134,7 @@ class IceCrystal:
                 self._rotate(max_rot3)
                 # if none of the new rotations was better we can leave
                 # it at the original rotation
-            self.rotation = [0, 0, 0]
+            self.rotation = [0, 0, 0] # set this new rotation as the default
 
     def plot(self):
         # return a multiline object representing the edges of the prism
@@ -165,7 +166,7 @@ class IceCrystal:
             # midx = np.mean(self.points['x'])
             # midy = np.mean(self.points['y'])
 
-            if self.points['y'][0] == self.points['y'][3]:
+            if self.points['z'][0] == self.points['z'][6]:
             # if self.rotation[1] == 0:
                 # it's lying flat (looks like a rectangle from above)
                 if len(np.unique(self.points['z'])) == 3:
@@ -480,7 +481,7 @@ class IceCluster:
         close_crystals.sort(key=lambda x: x.maxz, reverse=True)
 
         # look to see where the new crystal hits the old ones
-        mindiffz = crystal.maxz - first_hit_lower_bound
+        mindiffz = crystal.minz - first_hit_lower_bound # the largest it can possibly be
         for crystal2 in close_crystals:
             if first_hit_lower_bound > crystal2.maxz:
                 break # stop looping if the rest of the crystals are too low
@@ -501,14 +502,15 @@ class IceCluster:
 
     def reorient(self, method='schmitt', random_rotations=50):
         if method == 'schmitt':
+            # based on max_agg3.pro from IPAS
             max_rot1 = None
             max_area = self.projectxy().area
             for i in range(random_rotations):
-                [a, b, c] = [random.uniform(0, np.pi / 4), random.uniform(0, np.pi / 4), random.uniform(0, np.pi / 4)]
+                [a, b, c] = [np.random.uniform(high=np.pi / 4), np.random.uniform(high=np.pi / 4), np.random.uniform(high=np.pi / 4)]
                 # for mysterious reasons we are going to rotate this 3 times
                 rot1 = [a, b, c]
                 rot2 = [b * np.pi, c * np.pi, a * np.pi]
-                rot3 = [c * np.pi / 2, a * np.pi / 2, b * np.pi / 2]
+                rot3 = [c * np.pi * 2, a * np.pi * 2, b * np.pi * 2]
                 self.rotate_to(rot1)
                 self._rotate(rot2)
                 self._rotate(rot3)
@@ -522,7 +524,6 @@ class IceCluster:
                 self._rev_rotate(rot3)
                 self._rev_rotate(rot2)
                 self._rev_rotate(rot1)
-                
             # rotate new crystal to the area-maximizing rotation(s)
             if max_rot1 is not None:
                 self.rotate_to(max_rot1)
@@ -531,210 +532,163 @@ class IceCluster:
                 # if none of the new rotations was better we can leave
                 # it at the original rotation
             self.rotation = [0, 0, 0]
+            return True
+        
+        elif method == 'bh':
+            # use a basin-hopping algorithm to look for the optimal rotation
+            def f(x):
+                self.rotate_to([x[0], x[1], 0])
+                return -self.projectxy().area
+            min_kwargs = {'bounds': [(0, np.pi), (0, np.pi)], 'tol': .5}
+            opt_rot = opt.basinhopping(f, x0=[np.pi/2, np.pi/2], niter=5, stepsize=np.pi / 4,
+                                       interval=20, minimizer_kwargs=min_kwargs)
+            [xrot, yrot] = opt_rot.x
+            # area at rotation + pi is the same, so randomly choose to
+            # add those
+            if np.random.uniform() > .5:
+                xrot += np.pi
+            if np.random.uniform() > .5:
+                yrot += np.pi
+            zrot = np.random.uniform(high=2 * np.pi) # randomly choose z rotation
+            self.rotate_to([xrot, yrot, zrot])
+            self.rotation = [0, 0, 0]
+            return opt_rot
+        
+        elif method == 'random':
+            # rotate to a random direction
+            rot = [np.random.uniform(high=2 * np.pi), np.random.uniform(high=2 * np.pi), np.random.uniform(high=2 * np.pi)]
+            self.rotate_to(rot)
+            self.rotation = [0, 0, 0]
+            return True
 
-    def _get_slice_x(self, p1, p2):
-        # if the area goes up along the y-axis, we will have to
-        # calculate things differently
-        x1 = p1[0]
-        x2 = p2[0]
-        if (x1 / abs(x1)) != (x2 / abs(x2)):
-            # first find height of triangle at x=zero
-            y1 = p1[1]
-            y2 = p2[1]
-            m0 = (y1 - y2) / (x1 - x2)
-            height = -m0 * x2 + y2
-            # then integrate both sides
-            m1 = -height / x1
-            chunk1 = m1 * x1 ** 4 / 4 + height * x1 ** 3 / 3
-            m2 = -height / x2
-            chunk2 = -(m2 * x2 ** 4 / 4 + height * x2 ** 3 / 3)
-            return abs(chunk1 + chunk2)
-        # get the slopes from the origin to the points
-        x1 = p1[0]
-        x2 = p2[0]
-        m1 = p1[1] / p1[0]
-        m2 = p2[1] / p2[0]
-        # get the integral of the main chunk
-        main_chunk = (m2 - m1) * x2 ** 4 / 4
-        x_range = x1 - x2
-        if x_range != 0:
-            x_height = (m2 - m1) * x2
-            small_chunk = x_height *\
-                          (x1 * (x1 ** 3 - x2 ** 3) / 3 - (x1 ** 4 - x2 ** 4) / 4) /\
-                          x_range
-        else:
-            small_chunk = 0
-        return abs(main_chunk + small_chunk)
-
-    def _get_slice_xy(self, p1, p2):
-        # figure out which point is in the middle
-        points = [p1, p2, [0, 0]]
-        xs = [ p[0] for p in points]
-        xorder = np.argsort(xs)
-        # the coordinates of the left, middle, and right points,
-        # respectively
-        [xl, yl] = points[xorder[0]]
-        [xm, ym] = points[xorder[1]]
-        [xr, yr] = points[xorder[2]]
-        # slope of the line connecting the left and right points
+    def _get_moments(self, poly):
+        # get 'mass moments' for this cluster's 2D polygon using a
+        # variation of the shoelace algorithm
+        xys = poly.exterior.coords.xy
+        npoints = len(xys[0])
+        # values for the three points-- point[n], point[n+1], and
+        # (0,0)-- making up triangular slices from the origin to the
+        # edges of the polygon
+        xmat = np.array([xys[0][0:-1], xys[0][1:], np.zeros(npoints - 1)]).transpose()
+        ymat = np.array([xys[1][0:-1], xys[1][1:], np.zeros(npoints - 1)]).transpose()
+        # arrange the points in left-center-right order
+        x_order = np.argsort(xmat, axis=1)
+        ordered_xmat = xmat[np.array([range(npoints - 1)]).transpose(), x_order]
+        ordered_ymat = ymat[np.array([range(npoints - 1)]).transpose(), x_order]
+        xl = ordered_xmat[:, 0]
+        xm = ordered_xmat[:, 1]
+        xr = ordered_xmat[:, 2]
+        yl = ordered_ymat[:, 0]
+        ym = ordered_ymat[:, 1]
+        yr = ordered_ymat[:, 2]
+        # which slices have areas on the left and right sides of the
+        # middle point?
+        left = np.where(xl != xm)
+        right = np.where(xm != xr)
+        # slope and intercept of line connecting left and right points
         m3 = (yr - yl) / (xr - xl)
         b3 = -xl * m3 + yl
         # the y coordinate of the line connecting the left and right
         # points at the x position of the middle point
         m3_mid = yl + m3 * (xm - xl)
         # is the midpoint above or below that line?
-        mid_above = ym > m3_mid
-        # Writing this integral assuming the midpoint is above the
-        # other points. If it's not then I have to flip the sign.
-        if xm != xl:
-            m1 = (ym - yl) / (xm - xl)
-            b1 = -xl * m1 + yl
-            leftside1 = (xm ** 4 - xl ** 4) * (m1 ** 2 - m3 ** 2) / 8
-            leftside2 = (xm ** 3 - xl ** 3) * (b1 * m1 - b3 * m3) / 3
-            leftside3 = (xm ** 2 - xl ** 2) * (b1 ** 2 - b3 ** 2) / 4
-            leftside = leftside1 + leftside2 + leftside3
-        else:
-            leftside = 0
-        if xm != xr:
-            m2 = (yr - ym) / (xr - xm)
-            b2 = -xr * m2 + yr
-            rightside1 = (xr ** 4 - xm ** 4) * (m2 ** 2 - m3 ** 2) / 8
-            rightside2 = (xr ** 3 - xm ** 3) * (b2 * m2 - b3 * m3) / 3
-            rightside3 = (xr ** 2 - xm ** 2) * (b2 ** 2 - b3 ** 2) / 4
-            rightside = rightside1 + rightside2 + rightside3
-        else:
-            rightside = 0
-
-        if mid_above:
-            return leftside + rightside
-        else:
-            return -(leftside + rightside)
-
-    def _get_moments(self, poly):
-        # get 'mass' moments for this polygon
-        # using a variation of the shoelace algorithm
-        points = list(poly.exterior.coords)
-        npoints = len(points)
-        xtotal = 0
-        ytotal = 0
-        xytotal = 0
-        # the shapely polygons end with a copy of the first point, so
-        # this completes the loop even though it only goes to
-        # npoints-1
-        for n in range(npoints - 1):
-            p1 = list(points[n])
-            p2 = list(points[n + 1])
-            # are we going counterclockwise? if so make it positive
-            # (shapely appears to store polygon vertices in
-            # counterclockwise order, so this works out)
-            counterclockwise = np.cross(p1, p2) > 0
-            if counterclockwise:
-                c = 1
-            else:
-                c = -1
-            xtotal += c * self._get_slice_x(p1, p2)
-            # instead of writing a y-specific function I'm just going
-            # to transpose x and y whoa mind blown man
-            ytotal += c * self._get_slice_x(list(reversed(p1)), list(reversed(p2)))
-            xytotal -= c * self._get_slice_xy(p1, p2)
-        # now loop through the holes as needed, subtract areas
+        mid_below = ym < m3_mid
+        # line connecting left and middle point (where applicable)
+        m1 = (ym[left] - yl[left]) / (xm[left] - xl[left])
+        b1 = -xl[left] * m1 + yl[left]
+        # line connecting middle and right point (where applicable)
+        m2 = (yr[right] - ym[right]) / (xr[right] - xm[right])
+        b2 = -xr[right] * m2 + yr[right]
+        # now that we have the points in a nice format + helpful
+        # information we can calculate the integrals of the slices
+        xx = np.zeros(npoints - 1)
+        xy = np.zeros(npoints - 1)
+        yy = np.zeros(npoints - 1)
+        dxl = (xm[left] - xl[left])
+        dx2l = (xm[left] ** 2 - xl[left] ** 2)
+        dx3l = (xm[left] ** 3 - xl[left] ** 3)
+        dx4l = (xm[left] ** 4 - xl[left] ** 4)
+        dxr = (xr[right] - xm[right])
+        dx2r = (xr[right] ** 2 - xm[right] ** 2)
+        dx3r = (xr[right] ** 3 - xm[right] ** 3)
+        dx4r = (xr[right] ** 4 - xm[right] ** 4)
+        # x^2
+        xx[left] = dx4l * (m1 - m3[left]) / 4 +\
+                   dx3l * (b1 - b3[left]) / 3
+        xx[right] += dx4r * (m2 - m3[right]) / 4 +\
+                     dx3r * (b2 - b3[right]) / 3
+        # x*y
+        xy[left] = dx4l * (m1 ** 2 - m3[left] ** 2) / 8 +\
+                   dx3l * (b1 * m1 - b3[left] * m3[left]) / 3 +\
+                   dx2l * (b1 ** 2 - b3[left] ** 2) / 4
+        xy[right] += dx4r * (m2 ** 2 - m3[right] ** 2) / 8 +\
+                     dx3r * (b2 * m2 - b3[right] * m3[right]) / 3 +\
+                     dx2r * (b2 ** 2 - b3[right] ** 2) / 4
+        # y^2
+        yy[left] = dx4l * (m1 ** 3 - m3[left] ** 3) / 12 +\
+                   dx3l * (b1 * m1 ** 2 - b3[left] * m3[left] ** 2) / 3 +\
+                   dx2l * (b1 ** 2 * m1 - b3[left] ** 2 * m3[left]) / 2 +\
+                   dxl * (b1 ** 3 - b3[left] ** 3) / 3
+        yy[right] += dx4r * (m2 ** 3 - m3[right] ** 3) / 12 +\
+                     dx3r * (b2 * m2 ** 2- b3[right] * m3[right] ** 2) / 3 +\
+                     dx2r * (b2 ** 2 * m2 - b3[right] ** 2 * m3[right]) / 2 +\
+                     dxr * (b2 ** 3 - b3[right] ** 3) / 3
+        # if the middle point was below the other points, multiply by
+        # minus 1
+        xx[mid_below] *= -1
+        xy[mid_below] *= -1
+        yy[mid_below] *= -1
+        # find out which slices were going clockwise, and make those
+        # negative        
+        points = np.array([xys[0], xys[1]]).transpose()
+        cross_prods = np.cross(points[:-1], points[1:])
+        clockwise = cross_prods < 0
+        xx[clockwise] *= -1
+        xy[clockwise] *= -1
+        yy[clockwise] *= -1
+        # add up the totals across the entire polygon
+        xxtotal = np.sum(xx)
+        yytotal = np.sum(yy)
+        xytotal = np.sum(xy)
+        # and if the points were in clockwise order, flip the sign
+        if np.sum(cross_prods) < 0:
+            xxtotal *= -1
+            yytotal *= -1
+            xytotal *= -1
+        # also need to account for the holes, if they exist
         for linestring in list(poly.interiors):
-            poly2 = geom.Polygon(linestring)
-            # see if the polygon points are listed clockwise or
-            # counterclockwise
-            areas = []
-            points = list(poly2.exterior.coords)
-            for n in range(len(points) - 1):
-                areas.append(np.cross(points[n], points[n+1]))
-            clockwise = np.sum(areas) < 0
-            if clockwise:
-                c = -1
-            else:
-                c = 1
-            # whoa recursion mind blown man
-            minus_moments = self._get_moments(poly2)
-            xtotal -= minus_moments[0]
-            ytotal -= minus_moments[1]
-            xytotal -= c * minus_moments[2]
-
-        return [abs(xtotal), abs(ytotal), xytotal]
+            hole = geom.Polygon(linestring)
+            hole_moments = self._get_moments(hole)
+            xxtotal -= hole_moments[0]
+            yytotal -= hole_moments[1]
+            xytotal -= hole_moments[2]
+        return [xxtotal, yytotal, xytotal]
 
     def fit_ellipse(self):
         # Emulating this function, but for polygons in continuous
         # space rather than blobs in discrete space:
         # http://www.idlcoyote.com/ip_tips/fit_ellipse.html
-        # Using a variation of the shoelace formula to calculate mass
-        # moments for complicated polygons, integrating one triangular
-        # slice at a time.
         poly = self.projectxy()
         xy_area = poly.area
         
-        # temporarily center the cluster around the centroid
+        # center the polygon around the centroid
         centroid = poly.centroid
         poly = sha.translate(poly, -centroid.x, -centroid.y)
 
-        # # see if the polygon points are listed clockwise or
-        # # counterclockwise
-        # areas = []
-        # points = list(poly.exterior.coords)
-        # for n in range(len(points) - 1):
-        #     areas.append(np.cross(points[n], points[n+1]))
-        # clockwise = np.sum(areas) < 0
-        # if clockwise:
-        #     c = 1
-        # else:
-        #     c = -1
-
-        # if poly is actually a multipolygon, have to do a bit more
-        # work
-        if isinstance(poly, geom.multipolygon.MultiPolygon):
-            x = 0
-            y = 0
-            xy = 0
-            for poly2 in poly:
-                # see if the polygon points are listed clockwise or
-                # counterclockwise
-                areas = []
-                points = list(poly2.exterior.coords)
-                for n in range(len(points) - 1):
-                    areas.append(np.cross(points[n], points[n+1]))
-                clockwise = np.sum(areas) < 0
-                if clockwise:
-                    c = -1
-                else:
-                    c = 1
-                moments = self._get_moments(poly2)
-                x += moments[0] / xy_area
-                y += moments[1] / xy_area
-                xy += c * (moments[2] / xy_area)
-        else:
-            # see if the polygon points are listed clockwise or
-            # counterclockwise
-            areas = []
-            points = list(poly.exterior.coords)
-            for n in range(len(points) - 1):
-                areas.append(np.cross(points[n], points[n+1]))
-            clockwise = np.sum(areas) < 0
-            if clockwise:
-                c = -1
-            else:
-                c = 1
-            moments = self._get_moments(poly)
-            x = moments[0] / xy_area
-            y = moments[1] / xy_area
-            xy = c * (moments[2] / xy_area)
-            # the xy integral is calculated assuming the points are
-            # ordered counterclockwise, if not have to multiply by minus 1
+        moments = self._get_moments(poly)
+        xx = moments[0] / xy_area
+        yy = moments[1] / xy_area
+        xy = -moments[2] / xy_area
 
         # do magic
-        m = np.matrix([[y, xy], [xy, x]])
+        m = np.matrix([[yy, xy], [xy, xx]])
         evals, evecs = np.linalg.eigh(m)
         semimajor = np.sqrt(evals[0]) * 2
         semiminor = np.sqrt(evals[1]) * 2
         major = semimajor * 2
         minor = semiminor * 2
-        semiAxes = [semimajor, semiminor]
-        axes = [major, minor]
+        # semiAxes = [semimajor, semiminor]
+        # axes = [major, minor]
         evec = np.squeeze(np.asarray(evecs[0]))
         orientation = np.arctan2(evec[1], evec[0]) * 180 / np.pi
 
