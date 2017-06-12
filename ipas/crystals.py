@@ -1,4 +1,7 @@
-# do crystal things!
+"""Classes representing ice crystals (monomers) and ice clusters
+(aggregates).
+
+"""
 
 import numpy as np
 import scipy.optimize as opt
@@ -7,14 +10,18 @@ import shapely.ops as shops
 import shapely.affinity as sha
 
 class IceCrystal:
+    """A hexagonal prism representing a single ice crystal."""
+    
     def __init__(self, length, width, center=[0, 0, 0], rotation=[0, 0, 0]):
-        self.length = length
-        self.width = width
+        """Create an ice crystal.
+
+
+        """
         self.center = [0, 0, 0] # start the crystal at the origin
 
         # put together the hexagonal prism
-        ca = self.length # c axis length
-        mf = self.width # maximum face dimension
+        ca = length # c axis length
+        mf = width # maximum face dimension
         f = np.sqrt(3) / 4 # convenient number for hexagons
         x1 = ca / 2
         self.points = np.array([(x1, -mf / 4, mf * f), (x1, mf / 4, mf * f),
@@ -102,7 +109,10 @@ class IceCrystal:
         # now do the new rotation
         self._rotate(angles)
 
-    def reorient(self, method='schmitt', random_rotations=50):
+        # save the new rotation
+        self.rotation = angles
+
+    def reorient(self, method='schmitt', rotations=50):
         if method == 'schmitt':
             # based on max_area2.pro from IPAS
             max_area = self.projectxy().area
@@ -113,7 +123,7 @@ class IceCrystal:
                 rot1 = [a, b, c]
                 rot2 = [b * np.pi, c * np.pi, a * np.pi]
                 rot3 = [c * np.pi * 2, a * np.pi * 2, b * np.pi * 2]
-                self.rotate_to(rot1)
+                self._rotate(rot1)
                 self._rotate(rot2)
                 self._rotate(rot3)
                 new_area = self.projectxy().area
@@ -129,12 +139,59 @@ class IceCrystal:
                 self._rev_rotate(rot1)
             # rotate new crystal to the area-maximizing rotation(s)
             if max_rot1 is not None:
-                self.rotate_to(max_rot1)
+                self._rotate(max_rot1)
                 self._rotate(max_rot2)
                 self._rotate(max_rot3)
                 # if none of the new rotations was better we can leave
                 # it at the original rotation
             self.rotation = [0, 0, 0] # set this new rotation as the default
+        if method == 'schmitt1':
+            # based on max_area2.pro from IPAS
+            max_area = self.projectxy().area
+            max_rot1 = None
+            for i in range(random_rotations):
+                [a, b, c] = [np.random.uniform(high=np.pi), np.random.uniform(high=np.pi), np.random.uniform(high=np.pi)]
+                # for mysterious reasons we are going to rotate this 3 times
+                rot1 = [a, b, c]
+                self._rotate(rot1)
+                new_area = self.projectxy().area
+                if new_area > max_area:
+                    max_area = new_area
+                    max_rot1 = rot1
+                # now rotate back -- this is fun!
+                self._rev_rotate(rot1)
+                # rotate new crystal to the area-maximizing rotation(s)
+            if max_rot1 is not None:
+                self._rotate(max_rot1)
+                # if none of the new rotations was better we can leave
+                # it at the original rotation
+            self.rotation = [0, 0, 0] # set this new rotation as the default
+        elif method == 'schmitt2':
+            # same as schmitt but only rotating one time, with a real
+            # random rotation
+            max_rot = None
+            max_area = self.projectxy().area
+            for i in range(random_rotations):
+                yrot = np.arccos(np.random.uniform(-1, 1)) - np.pi / 2
+                rot = [np.random.uniform(high=2 * np.pi), yrot, np.random.uniform(high=2 * np.pi)]
+                self._rotate(rot)
+                new_area = self.projectxy().area
+                if new_area > max_area:
+                    max_area = new_area
+                    max_rot = rot
+                self._rev_rotate(rot)
+            if max_rot is not None:
+                self._rotate(max_rot)
+                # if none of the new rotations was better we can leave
+                # it at the original rotation
+            self.rotation = [0, 0, 0]
+            return True
+        elif method == 'random':
+            # rotate to a (more or less) random direction
+            rot = [np.random.uniform(high=2 * np.pi), np.random.uniform(high=2 * np.pi), np.random.uniform(high=2 * np.pi)]
+            self.rotate_to(rot)
+            self.rotation = [0, 0, 0]
+            return True
 
     def plot(self):
         # return a multiline object representing the edges of the prism
@@ -407,40 +464,94 @@ class IceCrystal:
         f.write('f ' + ' '.join(map(str, [6, 1, 7, 12])) + '\n')
         f.close()
 
-
-# an ice cluster!!
+# a vectorized ice cluster!!!
 class IceCluster:
-    def __init__(self, crystals, size=1):
-        self.crystals = crystals
-        self.ncrystals = len(self.crystals)
+    def __init__(self, crystal, size=1):
         # needed for bookkeeping:
         self.rotation = [0, 0, 0]
-        self.points = np.full((3, 12, size), np.nan, float)
-        for i, crystal in enumerate(crystals):
-            self.points[:, :, i] = crystal.points
+        self.points = np.full((size, 12), np.nan,
+                              dtype=[('x', float), ('y', float), ('z', float)])
+        self.points[0] = crystal.points
+        self.size = size
+        self.ncrystals = 1
+
+    def crystals(self, i=None):
+        # return a crystal with the same points and attributes as the
+        # nth crystal in the cluster
+        if i is None:
+            crystals = []
+            for n in range(self.ncrystals):
+                cr = IceCrystal(1, 1)
+                cr.points = self.points[n]
+                cr.rotation = self.rotation
+                cx = cr.points['x'].mean()
+                cy = cr.points['y'].mean()
+                cz = cr.points['z'].mean()
+                cr.center = [cx, cy, cz]
+                cr.maxz = cr.points['z'].max()
+                cr.minz = cr.points['z'].min()
+                crystals.append(cr)
+            return crystals
+        else:
+            cr = IceCrystal(1, 1)
+            cr.points = self.points[i]
+            cr.rotation = self.rotation
+            cx = cr.points['x'].mean()
+            cy = cr.points['y'].mean()
+            cz = cr.points['z'].mean()
+            cr.center = [cx, cy, cz]
+            cr.maxz = cr.points['z'].max()
+            cr.minz = cr.points['z'].min()
+            return cr
+
+    def _add_crystal(self, crystal):
+        n = self.ncrystals
+        if n < self.size:
+            self.points[n] = crystal.points
+            self.ncrystals += 1
+        else:
+            # should complain
+            pass
 
     def move(self, xyz):
         # move the entire cluster
-        # self.points[0] += xyz[0]
-        # self.points[1] += xyz[1]
-        # self.points[2] += xyz[2]
-        for crystal in self.crystals:
-            crystal.move(xyz)
+        self.points['x'][:self.ncrystals] += xyz[0]
+        self.points['y'][:self.ncrystals] += xyz[1]
+        self.points['z'][:self.ncrystals] += xyz[2]
+
+    def max(self, dim):
+        return self.points[dim][:self.ncrystals].max()
+
+    def min(self, dim):
+        return self.points[dim][:self.ncrystals].min()
 
     def _rotate(self, angles):
-        for crystal in self.crystals:
-            crystal._rotate(angles)
+        [x, y, z] = [self.points[:self.ncrystals]['x'], self.points[:self.ncrystals]['y'], self.points[:self.ncrystals]['z']]
+        [y, z] = [y * np.cos(angles[0]) - z * np.sin(angles[0]), y * np.sin(angles[0]) + z * np.cos(angles[0])]
+        [x, z] = [x * np.cos(angles[1]) + z * np.sin(angles[1]), -x * np.sin(angles[1]) + z * np.cos(angles[1])]
+        [x, y] = [x * np.cos(angles[2]) - y * np.sin(angles[2]), x * np.sin(angles[2]) + y * np.cos(angles[2])]
+        # update the crystal's points:
+        self.points['x'][:self.ncrystals] = x
+        self.points['y'][:self.ncrystals] = y
+        self.points['z'][:self.ncrystals] = z
 
     def _rev_rotate(self, angles):
-        # get back to the original rotation
-        for crystal in self.crystals:
-            crystal._rev_rotate(angles)
+        angles = [-x for x in angles ]
+        [x, y, z] = [self.points[:self.ncrystals]['x'], self.points[:self.ncrystals]['y'], self.points[:self.ncrystals]['z']]
+        [x, y] = [x * np.cos(angles[2]) - y * np.sin(angles[2]), x * np.sin(angles[2]) + y * np.cos(angles[2])]
+        [x, z] = [x * np.cos(angles[1]) + z * np.sin(angles[1]), -x * np.sin(angles[1]) + z * np.cos(angles[1])]
+        [y, z] = [y * np.cos(angles[0]) - z * np.sin(angles[0]), y * np.sin(angles[0]) + z * np.cos(angles[0])]
+        # update the crystal's points:
+        self.points['x'][:self.ncrystals] = x
+        self.points['y'][:self.ncrystals] = y
+        self.points['z'][:self.ncrystals] = z
 
     def rotate_to(self, angles):
         # rotate the entire cluster
 
         # first get back to the original rotation
-        self._rev_rotate(self.rotation)
+        if any(np.array(self.rotation) != 0):
+            self._rev_rotate(self.rotation)
 
         # now add the new rotation
         self._rotate(angles)
@@ -449,17 +560,75 @@ class IceCluster:
         self.rotation = angles
 
     def center_of_mass(self):
-        x = np.mean([ x.center[0] for x in self.crystals ])
-        y = np.mean([ x.center[1] for x in self.crystals ])
-        z = np.mean([ x.center[2] for x in self.crystals ])
+        x = np.mean(self.points[:self.ncrystals]['x'])
+        y = np.mean(self.points[:self.ncrystals]['y'])
+        z = np.mean(self.points[:self.ncrystals]['z'])
         return [x, y, z]
 
+    def recenter(self):
+        self.move([ -x for x in self.center_of_mass() ])
+
     def plot(self):
-        return geom.MultiLineString([ lines for crystal in self.crystals for lines in crystal.plot() ])
-        # return geom.MultiLineString([ lines for n in range(len(self.crystals)) for lines in self._plot_one(n) ])
+        return geom.MultiLineString([ lines for crystal in self.crystals() for lines in crystal.plot() ])
+
+    def _crystal_projectxy(self, n):
+        points = self.points[n]
+        # try using points instead of rotation in the if statements
+        if points['z'][0] == points['z'][6]:
+            # if (self.rotation[1] / (np.pi / 2)) % 2 == 1:
+            # (odd multiple of pi/2) it's vertical, so just return one
+            # of the hexagons
+            points2d = points[0:6]
+        else:
+            # prism is lying flat or tilted sideways
+            midx = self.points[n]['x'].mean()
+            midy = self.points[n]['y'].mean()
+            # midx = np.mean(self.points['x'])
+            # midy = np.mean(self.points['y'])
+
+            if points['z'][0] == points['z'][6]:
+                # if self.rotation[1] == 0:
+                # it's lying flat (looks like a rectangle from above)
+                if len(np.unique(points['z'])) == 3:
+                    # if (self.rotation[0] / (np.pi / 6)) % 2 == 1:
+                    # (odd multiple of pi/6) It's rotated so that
+                    # there's a ridge on the top, and the sides are
+                    # vertical. Ignore the two highest points (the top
+                    # ridge), get the next set of 4 points.
+                    points2d = points[np.argsort(-points['z'])[2:6]]
+                else:
+                    # find the 4 points farthest from the center
+                    distances = np.sqrt((points['x'] - midx) ** 2 + (points['y'] - midy) ** 2)
+                    points2d = points[np.argsort(-distances)[0:4]]
+            else:
+                # prism is tilted. Remove the two highest points from
+                # the upper hexagon and the two lowest points from the
+                # lower hexagon-- they'll always be inside the
+                # resulting 2D octagon!
+                hex1 = points[0:6]
+                hex2 = points[6:12]
+                if hex1['z'].max() > hex2['z'].max():
+                    upperhex = hex1
+                    lowerhex = hex2
+                else:
+                    upperhex = hex2
+                    lowerhex = hex1
+                upperhex = upperhex[np.argsort(upperhex['z'])[0:4]]
+                lowerhex = lowerhex[np.argsort(lowerhex['z'])[2:6]]
+                points2d = np.concatenate([upperhex, lowerhex])
+
+            # Get the angle of the line connecting the midpoint (which
+            # is always inside the 2d projection) to each point, then
+            # sort counterclockwise. This ensures that the points are
+            # connected in the right order.
+            angles = np.arctan2(points2d['y'] - midy, points2d['x'] - midx)
+            points2d = points2d[np.argsort(angles)]
+            
+        # take away the z-values-- now it's 2D! return polygon
+        return geom.Polygon(list(points2d[['x', 'y']]))
 
     def projectxy(self):
-        polygons = [ crystal.projectxy() for crystal in self.crystals ]
+        polygons = [ self._crystal_projectxy(n) for n in range(self.ncrystals) ]
         return shops.cascaded_union(polygons)
 
     def add_crystal_from_above(self, crystal, lodge=0):
@@ -468,7 +637,20 @@ class IceCluster:
         # first see which other crystals intersect with the new one in
         # the xy plane
         newpoly = crystal.projectxy()
-        close_crystals = [ x for x in self.crystals if x.projectxy().intersects(newpoly) ]
+        # use the bounding box to determine which crystals to get
+        xmax = max(newpoly.exterior.coords.xy[0])
+        ymax = max(newpoly.exterior.coords.xy[1])
+        xmin = min(newpoly.exterior.coords.xy[0])
+        ymin = min(newpoly.exterior.coords.xy[1])
+        close = np.all([self.points['x'][:self.ncrystals].max(axis=1) > xmin,
+                        self.points['x'][:self.ncrystals].min(axis=1) < xmax,
+                        self.points['y'][:self.ncrystals].max(axis=1) > ymin,
+                        self.points['y'][:self.ncrystals].min(axis=1) < ymax], axis=0)
+        which_close = np.where(close)
+        close_crystals = [ self.crystals(n) for n in which_close[0] ]
+        # see which crystals could actually intersect with the new crystal
+        close_crystals = [ x for x in close_crystals if x.projectxy().intersects(newpoly) ]
+        # close_crystals = [ x for x in self.crystals() if x.projectxy().intersects(newpoly) ]
         if len(close_crystals) == 0:
             return False # the crystal missed!
         
@@ -491,16 +673,17 @@ class IceCluster:
             if diffz < mindiffz:
                 mindiffz = diffz
                 first_hit_lower_bound = crystal.minz - mindiffz
-        # take the highest hit, move the crystal to that level
+                # take the highest hit, move the crystal to that level
         crystal.move([0, 0, -mindiffz - lodge])
 
         # append new crystal to list of crystals
-        self.crystals.append(crystal)
+        # self.crystals.append(crystal)
+        self._add_crystal(crystal)
         
         # fin.
         return True
 
-    def reorient(self, method='schmitt', random_rotations=50):
+    def reorient(self, method='schmitt', rotations=50):
         if method == 'schmitt':
             # based on max_agg3.pro from IPAS
             max_rot1 = None
@@ -511,7 +694,7 @@ class IceCluster:
                 rot1 = [a, b, c]
                 rot2 = [b * np.pi, c * np.pi, a * np.pi]
                 rot3 = [c * np.pi * 2, a * np.pi * 2, b * np.pi * 2]
-                self.rotate_to(rot1)
+                self._rotate(rot1)
                 self._rotate(rot2)
                 self._rotate(rot3)
                 new_area = self.projectxy().area
@@ -520,15 +703,57 @@ class IceCluster:
                     max_rot1 = rot1
                     max_rot2 = rot2
                     max_rot3 = rot3
-                # now rotate back -- this is fun!
+                    # now rotate back -- this is fun!
                 self._rev_rotate(rot3)
                 self._rev_rotate(rot2)
                 self._rev_rotate(rot1)
-            # rotate new crystal to the area-maximizing rotation(s)
+                # rotate new crystal to the area-maximizing rotation(s)
             if max_rot1 is not None:
-                self.rotate_to(max_rot1)
+                self._rotate(max_rot1)
                 self._rotate(max_rot2)
                 self._rotate(max_rot3)
+                # if none of the new rotations was better we can leave
+                # it at the original rotation
+            self.rotation = [0, 0, 0]
+            return True
+
+        if method == 'schmitt1':
+            # based on max_area2.pro from IPAS
+            max_area = self.projectxy().area
+            max_rot1 = None
+            for i in range(random_rotations):
+                [a, b, c] = [np.random.uniform(high=np.pi / 4), np.random.uniform(high=np.pi / 4), np.random.uniform(high=np.pi / 4)]
+                # for mysterious reasons we are going to rotate this 3 times
+                rot1 = [a, b, c]
+                self._rotate(rot1)
+                new_area = self.projectxy().area
+                if new_area > max_area:
+                    max_area = new_area
+                    max_rot1 = rot1
+                # now rotate back -- this is fun!
+                self._rev_rotate(rot1)
+                # rotate new crystal to the area-maximizing rotation(s)
+            if max_rot1 is not None:
+                self._rotate(max_rot1)
+                # if none of the new rotations was better we can leave
+                # it at the original rotation
+            self.rotation = [0, 0, 0] # set this new rotation as the default
+        if method == 'schmitt2':
+            # same as schmitt but only rotating one time, with a real
+            # random rotation
+            max_rot = None
+            max_area = self.projectxy().area
+            for i in range(random_rotations):
+                yrot = np.arccos(np.random.uniform(-1, 1)) - np.pi/2
+                rot = [np.random.uniform(high=2 * np.pi), yrot, np.random.uniform(high=2 * np.pi)]
+                self._rotate(rot)
+                new_area = self.projectxy().area
+                if new_area > max_area:
+                    max_area = new_area
+                    max_rot = rot
+                self._rev_rotate(rot)
+            if max_rot is not None:
+                self._rotate(max_rot)
                 # if none of the new rotations was better we can leave
                 # it at the original rotation
             self.rotation = [0, 0, 0]
@@ -537,18 +762,45 @@ class IceCluster:
         elif method == 'bh':
             # use a basin-hopping algorithm to look for the optimal rotation
             def f(x):
+                # yrot = np.arccos(x[1]) - np.pi/2
+                # self.rotate_to([x[0], yrot, 0])
                 self.rotate_to([x[0], x[1], 0])
                 return -self.projectxy().area
-            min_kwargs = {'bounds': [(0, np.pi), (0, np.pi)], 'tol': .5}
-            opt_rot = opt.basinhopping(f, x0=[np.pi/2, np.pi/2], niter=5, stepsize=np.pi / 4,
-                                       interval=20, minimizer_kwargs=min_kwargs)
+            # lbfgsb_opt = {'ftol': 1, 'maxiter': 5}
+            # min_kwargs = {'bounds': [(0, np.pi), (0, np.pi)], 'options': lbfgsb_opt}
+            # # min_kwargs = {'bounds': [(0, np.pi), (0, np.pi)]}
+            # opt_rot = opt.basinhopping(f, x0=[np.pi/2, np.pi/2], niter=15, stepsize=np.pi / 7,
+            #                            interval=5, minimizer_kwargs=min_kwargs)
+            lbfgsb_opt = {'ftol': 1, 'maxiter': 0, 'maxfun': 4}
+            min_kwargs = {'bounds': [(0, np.pi), (-0.99, 0.99)], 'options': lbfgsb_opt}
+            # min_kwargs = {'bounds': [(0, np.pi), 0, np.pi)]}
+            opt_rot = opt.basinhopping(f, x0=[np.pi/2, np.pi/2], niter=30, stepsize=np.pi / 4,
+                                       interval=10, minimizer_kwargs=min_kwargs)
+            # xrot = opt_rot.x[0]
+            # yrot = np.arccos(opt_rot.x[1]) - np.pi / 2
             [xrot, yrot] = opt_rot.x
             # area at rotation + pi is the same, so randomly choose to
             # add those
-            if np.random.uniform() > .5:
-                xrot += np.pi
-            if np.random.uniform() > .5:
-                yrot += np.pi
+            # if np.random.uniform() > .5:
+            #     xrot += np.pi
+            # if np.random.uniform() > .5:
+            #     yrot += np.pi
+            zrot = np.random.uniform(high=2 * np.pi) # randomly choose z rotation
+            self.rotate_to([xrot, yrot, zrot])
+            self.rotation = [0, 0, 0]
+            return opt_rot
+
+        elif method == 'diff_ev':
+            def f(x):
+                # yrot = np.arccos(x[1]) - np.pi/2
+                # self.rotate_to([x[0], yrot, 0])
+                self.rotate_to([x[0], x[1], 0])
+                return -self.projectxy().area
+            opt_rot = opt.differential_evolution(f, [(0, np.pi), (-1, 1)],
+                                                 maxiter=10, popsize=15)
+            # xrot = opt_rot.x[0]
+            # yrot = np.arccos(opt_rot.x[1]) - np.pi / 2
+            [xrot, yrot] = opt_rot.x
             zrot = np.random.uniform(high=2 * np.pi) # randomly choose z rotation
             self.rotate_to([xrot, yrot, zrot])
             self.rotation = [0, 0, 0]
@@ -556,7 +808,9 @@ class IceCluster:
         
         elif method == 'random':
             # rotate to a random direction
-            rot = [np.random.uniform(high=2 * np.pi), np.random.uniform(high=2 * np.pi), np.random.uniform(high=2 * np.pi)]
+            # https://stackoverflow.com/questions/33976911/generate-a-random-sample-of-points-distributed-on-the-surface-of-a-unit-sphere
+            yrot = np.arccos(np.random.uniform(-1, 1)) - np.pi/2
+            rot = [np.random.uniform(high=2 * np.pi), yrot, np.random.uniform(high=2 * np.pi)]
             self.rotate_to(rot)
             self.rotation = [0, 0, 0]
             return True
@@ -583,10 +837,12 @@ class IceCluster:
         yr = ordered_ymat[:, 2]
         # which slices have areas on the left and right sides of the
         # middle point?
-        left = np.where(xl != xm)
-        right = np.where(xm != xr)
+        left = xm != xl
+        right = xr != xm
         # slope and intercept of line connecting left and right points
-        m3 = (yr - yl) / (xr - xl)
+        has_area = xr != xl
+        m3 = np.zeros(npoints - 1)
+        m3[has_area] = (yr[has_area] - yl[has_area]) / (xr[has_area] - xl[has_area])
         b3 = -xl * m3 + yl
         # the y coordinate of the line connecting the left and right
         # points at the x position of the middle point
@@ -655,7 +911,7 @@ class IceCluster:
             xxtotal *= -1
             yytotal *= -1
             xytotal *= -1
-        # also need to account for the holes, if they exist
+            # also need to account for the holes, if they exist
         for linestring in list(poly.interiors):
             hole = geom.Polygon(linestring)
             hole_moments = self._get_moments(hole)
@@ -715,20 +971,20 @@ class IceCluster:
         else:
             x, y = poly.exterior.xy
             ax.plot(x, y)
-        maxdim = max([params['width'], params['height']])# / 2
-        ax.set_xlim([-maxdim + params['xy'][0], maxdim + params['xy'][0]])
-        ax.set_ylim([-maxdim + params['xy'][1], maxdim + params['xy'][1]])
-        ax.set_aspect('equal', 'datalim')
+            maxdim = max([params['width'], params['height']])# / 2
+            ax.set_xlim([-maxdim + params['xy'][0], maxdim + params['xy'][0]])
+            ax.set_ylim([-maxdim + params['xy'][1], maxdim + params['xy'][1]])
+            ax.set_aspect('equal', 'datalim')
 
     def write_obj(self, filename):
         f = open(filename, 'w')
 
         faces = []
-        for i, crystal in enumerate(self.crystals):
+        for i, crystal in enumerate(self.crystals()):
             # write the vertices
             for n in range(12):
                 f.write('v ' + ' '.join(map(str, crystal.points[n])) + '\n')
-            # write the hexagons
+                # write the hexagons
             nc = i * 12
             for n in range(2):
                 coords = range(n * 6 + 1 + nc, (n + 1) * 6 + 1 + nc)
@@ -736,10 +992,10 @@ class IceCluster:
             for n in range(5):
                 coords = [n + 1 + nc, n + 2 + nc, n + 8 + nc, n + 7 + nc]
                 faces.append('f ' + ' '.join(map(str, coords)))
-            coords = [nc + 6, nc + 1, nc + 7, nc + 12]
-            faces.append('f ' + ' '.join(map(str, coords)))
-        f.write('\n'.join(faces))
-        f.close()
+                coords = [nc + 6, nc + 1, nc + 7, nc + 12]
+                faces.append('f ' + ' '.join(map(str, coords)))
+                f.write('\n'.join(faces))
+                f.close()
 
     def aspect_ratio(self, method):
         rotation = self.rotation
