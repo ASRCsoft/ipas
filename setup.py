@@ -5,7 +5,7 @@ setup(
     version='0.1dev',
     packages=['ipas'],
     install_requires=[
-        "shapely >= 1.6",
-        "numpy >= 1.13",
+        "shapely >= 1.5",
+        "numpy >= 1.12",
     ]
 )
