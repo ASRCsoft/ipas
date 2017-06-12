@@ -112,8 +112,8 @@ class IceCrystal:
         # save the new rotation
         self.rotation = angles
 
-    def reorient(self, method='schmitt', rotations=50):
-        if method == 'schmitt':
+    def reorient(self, method='random', rotations=50):
+        if method == 'idl':
             # based on max_area2.pro from IPAS
             max_area = self.projectxy().area
             max_rot1 = None
@@ -145,28 +145,7 @@ class IceCrystal:
                 # if none of the new rotations was better we can leave
                 # it at the original rotation
             self.rotation = [0, 0, 0] # set this new rotation as the default
-        if method == 'schmitt1':
-            # based on max_area2.pro from IPAS
-            max_area = self.projectxy().area
-            max_rot1 = None
-            for i in range(random_rotations):
-                [a, b, c] = [np.random.uniform(high=np.pi), np.random.uniform(high=np.pi), np.random.uniform(high=np.pi)]
-                # for mysterious reasons we are going to rotate this 3 times
-                rot1 = [a, b, c]
-                self._rotate(rot1)
-                new_area = self.projectxy().area
-                if new_area > max_area:
-                    max_area = new_area
-                    max_rot1 = rot1
-                # now rotate back -- this is fun!
-                self._rev_rotate(rot1)
-                # rotate new crystal to the area-maximizing rotation(s)
-            if max_rot1 is not None:
-                self._rotate(max_rot1)
-                # if none of the new rotations was better we can leave
-                # it at the original rotation
-            self.rotation = [0, 0, 0] # set this new rotation as the default
-        elif method == 'schmitt2':
+        elif method == 'random':
             # same as schmitt but only rotating one time, with a real
             # random rotation
             max_rot = None
@@ -185,13 +164,6 @@ class IceCrystal:
                 # if none of the new rotations was better we can leave
                 # it at the original rotation
             self.rotation = [0, 0, 0]
-            return True
-        elif method == 'random':
-            # rotate to a (more or less) random direction
-            rot = [np.random.uniform(high=2 * np.pi), np.random.uniform(high=2 * np.pi), np.random.uniform(high=2 * np.pi)]
-            self.rotate_to(rot)
-            self.rotation = [0, 0, 0]
-            return True
 
     def plot(self):
         # return a multiline object representing the edges of the prism
@@ -683,8 +655,8 @@ class IceCluster:
         # fin.
         return True
 
-    def reorient(self, method='schmitt', rotations=50):
-        if method == 'schmitt':
+    def reorient(self, method='random', rotations=50):
+        if method == 'idl':
             # based on max_agg3.pro from IPAS
             max_rot1 = None
             max_area = self.projectxy().area
@@ -715,30 +687,8 @@ class IceCluster:
                 # if none of the new rotations was better we can leave
                 # it at the original rotation
             self.rotation = [0, 0, 0]
-            return True
-
-        if method == 'schmitt1':
-            # based on max_area2.pro from IPAS
-            max_area = self.projectxy().area
-            max_rot1 = None
-            for i in range(random_rotations):
-                [a, b, c] = [np.random.uniform(high=np.pi / 4), np.random.uniform(high=np.pi / 4), np.random.uniform(high=np.pi / 4)]
-                # for mysterious reasons we are going to rotate this 3 times
-                rot1 = [a, b, c]
-                self._rotate(rot1)
-                new_area = self.projectxy().area
-                if new_area > max_area:
-                    max_area = new_area
-                    max_rot1 = rot1
-                # now rotate back -- this is fun!
-                self._rev_rotate(rot1)
-                # rotate new crystal to the area-maximizing rotation(s)
-            if max_rot1 is not None:
-                self._rotate(max_rot1)
-                # if none of the new rotations was better we can leave
-                # it at the original rotation
-            self.rotation = [0, 0, 0] # set this new rotation as the default
-        if method == 'schmitt2':
+            
+        elif method == 'random':
             # same as schmitt but only rotating one time, with a real
             # random rotation
             max_rot = None
@@ -757,63 +707,53 @@ class IceCluster:
                 # if none of the new rotations was better we can leave
                 # it at the original rotation
             self.rotation = [0, 0, 0]
-            return True
         
-        elif method == 'bh':
-            # use a basin-hopping algorithm to look for the optimal rotation
-            def f(x):
-                # yrot = np.arccos(x[1]) - np.pi/2
-                # self.rotate_to([x[0], yrot, 0])
-                self.rotate_to([x[0], x[1], 0])
-                return -self.projectxy().area
-            # lbfgsb_opt = {'ftol': 1, 'maxiter': 5}
-            # min_kwargs = {'bounds': [(0, np.pi), (0, np.pi)], 'options': lbfgsb_opt}
-            # # min_kwargs = {'bounds': [(0, np.pi), (0, np.pi)]}
-            # opt_rot = opt.basinhopping(f, x0=[np.pi/2, np.pi/2], niter=15, stepsize=np.pi / 7,
-            #                            interval=5, minimizer_kwargs=min_kwargs)
-            lbfgsb_opt = {'ftol': 1, 'maxiter': 0, 'maxfun': 4}
-            min_kwargs = {'bounds': [(0, np.pi), (-0.99, 0.99)], 'options': lbfgsb_opt}
-            # min_kwargs = {'bounds': [(0, np.pi), 0, np.pi)]}
-            opt_rot = opt.basinhopping(f, x0=[np.pi/2, np.pi/2], niter=30, stepsize=np.pi / 4,
-                                       interval=10, minimizer_kwargs=min_kwargs)
-            # xrot = opt_rot.x[0]
-            # yrot = np.arccos(opt_rot.x[1]) - np.pi / 2
-            [xrot, yrot] = opt_rot.x
-            # area at rotation + pi is the same, so randomly choose to
-            # add those
-            # if np.random.uniform() > .5:
-            #     xrot += np.pi
-            # if np.random.uniform() > .5:
-            #     yrot += np.pi
-            zrot = np.random.uniform(high=2 * np.pi) # randomly choose z rotation
-            self.rotate_to([xrot, yrot, zrot])
-            self.rotation = [0, 0, 0]
-            return opt_rot
+        # elif method == 'bh':
+        #     # use a basin-hopping algorithm to look for the optimal rotation
+        #     def f(x):
+        #         # yrot = np.arccos(x[1]) - np.pi/2
+        #         # self.rotate_to([x[0], yrot, 0])
+        #         self.rotate_to([x[0], x[1], 0])
+        #         return -self.projectxy().area
+        #     # lbfgsb_opt = {'ftol': 1, 'maxiter': 5}
+        #     # min_kwargs = {'bounds': [(0, np.pi), (0, np.pi)], 'options': lbfgsb_opt}
+        #     # # min_kwargs = {'bounds': [(0, np.pi), (0, np.pi)]}
+        #     # opt_rot = opt.basinhopping(f, x0=[np.pi/2, np.pi/2], niter=15, stepsize=np.pi / 7,
+        #     #                            interval=5, minimizer_kwargs=min_kwargs)
+        #     lbfgsb_opt = {'ftol': 1, 'maxiter': 0, 'maxfun': 4}
+        #     min_kwargs = {'bounds': [(0, np.pi), (-0.99, 0.99)], 'options': lbfgsb_opt}
+        #     # min_kwargs = {'bounds': [(0, np.pi), 0, np.pi)]}
+        #     opt_rot = opt.basinhopping(f, x0=[np.pi/2, np.pi/2], niter=30, stepsize=np.pi / 4,
+        #                                interval=10, minimizer_kwargs=min_kwargs)
+        #     # xrot = opt_rot.x[0]
+        #     # yrot = np.arccos(opt_rot.x[1]) - np.pi / 2
+        #     [xrot, yrot] = opt_rot.x
+        #     # area at rotation + pi is the same, so randomly choose to
+        #     # add those
+        #     # if np.random.uniform() > .5:
+        #     #     xrot += np.pi
+        #     # if np.random.uniform() > .5:
+        #     #     yrot += np.pi
+        #     zrot = np.random.uniform(high=2 * np.pi) # randomly choose z rotation
+        #     self.rotate_to([xrot, yrot, zrot])
+        #     self.rotation = [0, 0, 0]
+        #     return opt_rot
 
-        elif method == 'diff_ev':
-            def f(x):
-                # yrot = np.arccos(x[1]) - np.pi/2
-                # self.rotate_to([x[0], yrot, 0])
-                self.rotate_to([x[0], x[1], 0])
-                return -self.projectxy().area
-            opt_rot = opt.differential_evolution(f, [(0, np.pi), (-1, 1)],
-                                                 maxiter=10, popsize=15)
-            # xrot = opt_rot.x[0]
-            # yrot = np.arccos(opt_rot.x[1]) - np.pi / 2
-            [xrot, yrot] = opt_rot.x
-            zrot = np.random.uniform(high=2 * np.pi) # randomly choose z rotation
-            self.rotate_to([xrot, yrot, zrot])
-            self.rotation = [0, 0, 0]
-            return opt_rot
-        
-        elif method == 'random':
-            # rotate to a random direction
-            # https://stackoverflow.com/questions/33976911/generate-a-random-sample-of-points-distributed-on-the-surface-of-a-unit-sphere
-            yrot = np.arccos(np.random.uniform(-1, 1)) - np.pi/2
-            rot = [np.random.uniform(high=2 * np.pi), yrot, np.random.uniform(high=2 * np.pi)]
-            self.rotate_to(rot)
-            self.rotation = [0, 0, 0]
-            return True
+        # elif method == 'diff_ev':
+        #     def f(x):
+        #         # yrot = np.arccos(x[1]) - np.pi/2
+        #         # self.rotate_to([x[0], yrot, 0])
+        #         self.rotate_to([x[0], x[1], 0])
+        #         return -self.projectxy().area
+        #     opt_rot = opt.differential_evolution(f, [(0, np.pi), (-1, 1)],
+        #                                          maxiter=10, popsize=15)
+        #     # xrot = opt_rot.x[0]
+        #     # yrot = np.arccos(opt_rot.x[1]) - np.pi / 2
+        #     [xrot, yrot] = opt_rot.x
+        #     zrot = np.random.uniform(high=2 * np.pi) # randomly choose z rotation
+        #     self.rotate_to([xrot, yrot, zrot])
+        #     self.rotation = [0, 0, 0]
+        #     return opt_rot
 
     def _get_moments(self, poly):
         # get 'mass moments' for this cluster's 2D polygon using a

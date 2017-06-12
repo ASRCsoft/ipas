@@ -1,3 +1,5 @@
+"""Utilities for running ice particle simulations."""
+
 import random
 import numpy as np
 import scipy.optimize as opt
