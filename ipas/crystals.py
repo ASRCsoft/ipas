@@ -17,8 +17,6 @@ class IceCrystal:
 
 
         """
-        self.center = [0, 0, 0] # start the crystal at the origin
-
         # put together the hexagonal prism
         ca = length # c axis length
         mf = width # maximum face dimension
@@ -37,6 +35,7 @@ class IceCrystal:
         #          [-mf/4. ,mf/4.  ,mf/2. ,mf/4. ,-mf/4. ,-mf/2. ,-mf/4. ,mf/4.  ,mf/2.  ,mf/4.  ,-mf/4. ,-mf/2.],$
         #          [mf*f   ,mf*f   ,0.    ,-mf*f ,-mf*f  ,0.     ,mf*f   ,mf*f   ,0.     ,-mf*f  ,-mf*f  ,0.]]
 
+        self.center = [0, 0, 0] # start the crystal at the origin
         self._rotate(rotation) # rotate the crystal
         self.rotation = rotation
         self.move(center) # move the crystal
@@ -117,7 +116,7 @@ class IceCrystal:
             # based on max_area2.pro from IPAS
             max_area = self.projectxy().area
             max_rot1 = None
-            for i in range(random_rotations):
+            for i in range(rotations):
                 [a, b, c] = [np.random.uniform(high=np.pi), np.random.uniform(high=np.pi), np.random.uniform(high=np.pi)]
                 # for mysterious reasons we are going to rotate this 3 times
                 rot1 = [a, b, c]
@@ -150,7 +149,7 @@ class IceCrystal:
             # random rotation
             max_rot = None
             max_area = self.projectxy().area
-            for i in range(random_rotations):
+            for i in range(rotations):
                 yrot = np.arccos(np.random.uniform(-1, 1)) - np.pi / 2
                 rot = [np.random.uniform(high=2 * np.pi), yrot, np.random.uniform(high=2 * np.pi)]
                 self._rotate(rot)
@@ -183,10 +182,10 @@ class IceCrystal:
         # project the points onto a 2d surface, return a polygon
 
         # try using points instead of rotation in the if statements
-        if self.points['z'][0] == self.points['z'][6]:
-        # if (self.rotation[1] / (np.pi / 2)) % 2 == 1:
-            # (odd multiple of pi/2) it's vertical, so just return one
-            # of the hexagons
+        p0 = self.points[0]
+        p6 = self.points[6]
+        if p0['x'] == p6['x'] and p0['y'] == p6['y']:
+            # It's vertical, so just return one of the hexagons
             points2d = self.points[0:6]
         else:
             # prism is lying flat or tilted sideways
@@ -195,15 +194,13 @@ class IceCrystal:
             # midx = np.mean(self.points['x'])
             # midy = np.mean(self.points['y'])
 
-            if self.points['z'][0] == self.points['z'][6]:
-            # if self.rotation[1] == 0:
-                # it's lying flat (looks like a rectangle from above)
-                if len(np.unique(self.points['z'])) == 3:
-                # if (self.rotation[0] / (np.pi / 6)) % 2 == 1:
-                    # (odd multiple of pi/6) It's rotated so that
-                    # there's a ridge on the top, and the sides are
-                    # vertical. Ignore the two highest points (the top
-                    # ridge), get the next set of 4 points.
+            if p0['z'] == p6['z']:
+                # It's lying flat (looks like a rectangle from above)
+                if len(np.unique(self.points['z'])) == 4:
+                    # It's rotated so that there's a ridge on the top,
+                    # and the sides are vertical. Ignore the two
+                    # highest points (the top ridge), get the next set
+                    # of 4 points.
                     points2d = self.points[np.argsort(-self.points['z'])[2:6]]
                 else:
                     # find the 4 points farthest from the center
@@ -436,7 +433,7 @@ class IceCrystal:
         f.write('f ' + ' '.join(map(str, [6, 1, 7, 12])) + '\n')
         f.close()
 
-# a vectorized ice cluster!!!
+        
 class IceCluster:
     def __init__(self, crystal, size=1):
         # needed for bookkeeping:
@@ -480,10 +477,9 @@ class IceCluster:
         n = self.ncrystals
         if n < self.size:
             self.points[n] = crystal.points
-            self.ncrystals += 1
         else:
-            # should complain
-            pass
+            self.points = np.append(self.points, [crystal.points], axis=0)
+        self.ncrystals += 1
 
     def move(self, xyz):
         # move the entire cluster
@@ -544,29 +540,27 @@ class IceCluster:
         return geom.MultiLineString([ lines for crystal in self.crystals() for lines in crystal.plot() ])
 
     def _crystal_projectxy(self, n):
-        points = self.points[n]
         # try using points instead of rotation in the if statements
-        if points['z'][0] == points['z'][6]:
-            # if (self.rotation[1] / (np.pi / 2)) % 2 == 1:
-            # (odd multiple of pi/2) it's vertical, so just return one
-            # of the hexagons
+        points = self.points[n]
+        p0 = points[0]
+        p6 = points[6]
+        if p0['x'] == p6['x'] and p0['y'] == p6['y']:
+            # It's vertical, so just return one of the hexagons
             points2d = points[0:6]
         else:
             # prism is lying flat or tilted sideways
-            midx = self.points[n]['x'].mean()
-            midy = self.points[n]['y'].mean()
+            midx = points['x'].mean()
+            midy = points['y'].mean()
             # midx = np.mean(self.points['x'])
             # midy = np.mean(self.points['y'])
 
-            if points['z'][0] == points['z'][6]:
-                # if self.rotation[1] == 0:
-                # it's lying flat (looks like a rectangle from above)
-                if len(np.unique(points['z'])) == 3:
-                    # if (self.rotation[0] / (np.pi / 6)) % 2 == 1:
-                    # (odd multiple of pi/6) It's rotated so that
-                    # there's a ridge on the top, and the sides are
-                    # vertical. Ignore the two highest points (the top
-                    # ridge), get the next set of 4 points.
+            if p0['z'] == p6['z']:
+                # It's lying flat (looks like a rectangle from above)
+                if len(np.unique(points['z'])) == 4:
+                    # It's rotated so that there's a ridge on the top,
+                    # and the sides are vertical. Ignore the two
+                    # highest points (the top ridge), get the next set
+                    # of 4 points.
                     points2d = points[np.argsort(-points['z'])[2:6]]
                 else:
                     # find the 4 points farthest from the center
@@ -660,7 +654,7 @@ class IceCluster:
             # based on max_agg3.pro from IPAS
             max_rot1 = None
             max_area = self.projectxy().area
-            for i in range(random_rotations):
+            for i in range(rotations):
                 [a, b, c] = [np.random.uniform(high=np.pi / 4), np.random.uniform(high=np.pi / 4), np.random.uniform(high=np.pi / 4)]
                 # for mysterious reasons we are going to rotate this 3 times
                 rot1 = [a, b, c]
@@ -693,7 +687,7 @@ class IceCluster:
             # random rotation
             max_rot = None
             max_area = self.projectxy().area
-            for i in range(random_rotations):
+            for i in range(rotations):
                 yrot = np.arccos(np.random.uniform(-1, 1)) - np.pi/2
                 rot = [np.random.uniform(high=2 * np.pi), yrot, np.random.uniform(high=2 * np.pi)]
                 self._rotate(rot)
@@ -911,10 +905,10 @@ class IceCluster:
         else:
             x, y = poly.exterior.xy
             ax.plot(x, y)
-            maxdim = max([params['width'], params['height']])# / 2
-            ax.set_xlim([-maxdim + params['xy'][0], maxdim + params['xy'][0]])
-            ax.set_ylim([-maxdim + params['xy'][1], maxdim + params['xy'][1]])
-            ax.set_aspect('equal', 'datalim')
+        #maxdim = max([params['width'], params['height']])# / 2
+        #ax.set_xlim([-maxdim + params['xy'][0], maxdim + params['xy'][0]])
+        #ax.set_ylim([-maxdim + params['xy'][1], maxdim + params['xy'][1]])
+        ax.set_aspect('equal', 'datalim')
 
     def write_obj(self, filename):
         f = open(filename, 'w')
