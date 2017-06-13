@@ -14,12 +14,15 @@ def sim_clusters(length, width, nclusters, ncrystals, reorient='random', rotatio
         nclusters (int): The number of clusters to simulate.
         ncrystals (int): The number of crystals in each cluster.
         reorient (str): The method to use for reorienting crystals and clusters.
-            Either 'random' or 'IDL'. Default is 'random'.
+            'random' chooses rotations at random and selects the area-maximizing
+            rotation. 'IDL' exactly reproduces the IPAS IDL code. Default is
+            'random'.
         rotations (int): The number of rotations to use to reorient crystals and
             clusters. Default is 50.
         speedy (bool): If true, choose an optimal rotation for single crystals
             instead of reorienting them. Default is false.
-        lodge (float): A distance. Used to match the output of IPAS IDL code,
+        lodge (float): The vertical distance that crystals lodge into each other
+            when added from above. Useful for matching the output of IPAS IDL code,
             which uses 0.5. Default is zero.
 
     Returns:
