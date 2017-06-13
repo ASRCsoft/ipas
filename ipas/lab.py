@@ -14,7 +14,7 @@ def sim_clusters(length, width, nclusters, ncrystals, reorient='random', rotatio
         nclusters (int): The number of clusters to simulate.
         ncrystals (int): The number of crystals in each cluster.
         reorient (str): The method to use for reorienting crystals and clusters.
-            Either 'random' or 'idl'. Default is 'random'.
+            Either 'random' or 'IDL'. Default is 'random'.
         rotations (int): The number of rotations to use to reorient crystals and
             clusters. Default is 50.
         speedy (bool): If true, choose an optimal rotation for single crystals
@@ -96,6 +96,11 @@ class IceClusterBatch:
         self.ratios = None
 
     def calc_aspect_ratios(self):
+        """Calculate the aspect ratios of the clusters using ellipses fitted
+        to the 2D cluster projections from the x-, y-, and z-axis
+        perspectives.
+
+        """
         if self.plates is None:
             # inform the user that they need to specify whether these
             # clusters are made of columns or plates
@@ -109,6 +114,9 @@ class IceClusterBatch:
         return ratios
 
     def plot_aspect_ratios(self, **kwargs):
+        """Plot a histogram of cluster aspect ratios, sending extra arguments
+        to `matplotlib.pyplot.hist`.
+        """
         import matplotlib.pyplot as plt
         if self.ratios is None:
             self.calc_aspect_ratios()

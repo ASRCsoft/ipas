@@ -112,7 +112,7 @@ class IceCrystal:
         self.rotation = angles
 
     def reorient(self, method='random', rotations=50):
-        if method == 'idl':
+        if method == 'IDL':
             # based on max_area2.pro from IPAS
             max_area = self.projectxy().area
             max_rot1 = None
@@ -650,7 +650,7 @@ class IceCluster:
         return True
 
     def reorient(self, method='random', rotations=50):
-        if method == 'idl':
+        if method == 'IDL':
             # based on max_agg3.pro from IPAS
             max_rot1 = None
             max_area = self.projectxy().area
