@@ -73,7 +73,7 @@ def sim_clusters(length, width, nclusters, ncrystals, reorient='random', rotatio
             random_loc = [random.uniform(xmin, xmax), random.uniform(ymin, ymax), 0]
             if speedy:
                 rotation = [0, yrot, random.uniform(0, 2 * np.pi)]
-                seedcrystal = crys.IceCrystal(length=length, width=width, center=random_loc, rotation=rotation)
+                new_crystal = crys.IceCrystal(length=length, width=width, center=random_loc, rotation=rotation)
             else:
                 # make a new crystal, orient it
                 new_crystal = crys.IceCrystal(length=length, width=width)

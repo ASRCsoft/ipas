@@ -41,6 +41,7 @@ class IceCrystal:
         self.move(center) # move the crystal
         self.maxz = self.points['z'].max()
         self.minz = self.points['z'].min()
+        self.tol = 10 ** -11 # used for some calculations
 
     def move(self, xyz):
         self.points['x'] += xyz[0]
@@ -114,8 +115,9 @@ class IceCrystal:
     def reorient(self, method='random', rotations=50):
         if method == 'IDL':
             # based on max_area2.pro from IPAS
-            max_area = self.projectxy().area
-            max_rot1 = None
+            # max_area = self.projectxy().area
+            # max_rot1 = None
+            max_area = 0
             for i in range(rotations):
                 [a, b, c] = [np.random.uniform(high=np.pi), np.random.uniform(high=np.pi), np.random.uniform(high=np.pi)]
                 # for mysterious reasons we are going to rotate this 3 times
@@ -136,19 +138,17 @@ class IceCrystal:
                 self._rev_rotate(rot3)
                 self._rev_rotate(rot2)
                 self._rev_rotate(rot1)
-            # rotate new crystal to the area-maximizing rotation(s)
-            if max_rot1 is not None:
-                self._rotate(max_rot1)
-                self._rotate(max_rot2)
-                self._rotate(max_rot3)
-                # if none of the new rotations was better we can leave
-                # it at the original rotation
+            # rotate new crystal to the area-maximizing rotation
+            self._rotate(max_rot1)
+            self._rotate(max_rot2)
+            self._rotate(max_rot3)
             self.rotation = [0, 0, 0] # set this new rotation as the default
         elif method == 'random':
             # same as schmitt but only rotating one time, with a real
             # random rotation
-            max_rot = None
-            max_area = self.projectxy().area
+            # max_rot = None
+            # max_area = self.projectxy().area
+            max_area = 0
             for i in range(rotations):
                 yrot = np.arccos(np.random.uniform(-1, 1)) - np.pi / 2
                 rot = [np.random.uniform(high=2 * np.pi), yrot, np.random.uniform(high=2 * np.pi)]
@@ -158,10 +158,8 @@ class IceCrystal:
                     max_area = new_area
                     max_rot = rot
                 self._rev_rotate(rot)
-            if max_rot is not None:
-                self._rotate(max_rot)
-                # if none of the new rotations was better we can leave
-                # it at the original rotation
+            # rotate new crystal to the area-maximizing rotation
+            self._rotate(max_rot)
             self.rotation = [0, 0, 0]
 
     def plot(self):
@@ -237,50 +235,89 @@ class IceCrystal:
         # just return everything for now until I get better code
         # written
 
-        points = []
+        # getting the same points regardless of the orientation
+        points = [ geom.Point(list(x)) for x in self.points ]
         lines = []
         faces = []
-        # # unless it's vertical, that's easy
-        # if self.points['x'][0] == self.points['x'][6] and self.points['y'][0] == self.points['y'][6]:
-        # # if (self.rotation[1] / (np.pi / 2)) % 4 == 1:
-        #     points = [ geom.Point(list(x)) for x in self.points[6:12] ]
-        #     for i in range(5): # get the points around each hexagon
-        #         lines.append(geom.LineString([self.points[i + 6], self.points[i + 7]]))
-        #         lines.append(geom.LineString([self.points[11], self.points[6]]))
-        # elif (self.rotation[1] / (np.pi / 2)) % 4 == 3:
-        #     points = [ geom.Point(list(x)) for x in self.points[0:6] ]
-        #     for i in range(5): # get the points around each hexagon
-        #         lines.append(geom.LineString([self.points[i], self.points[i + 1]]))
-        #         lines.append(geom.LineString([self.points[5], self.points[0]]))
-        # else:
         
-        # get the points
-        for n in range(12):
-            points.append(geom.Point(list(self.points[n])))
-        # get the hexagon lines
-        for hexn in range(2): # cycle through 2 hexagons
-            for n in range(5): # get the points around each hexagon
-                i = n + hexn * 6
-                lines.append(geom.LineString([self.points[i], self.points[i + 1]]))
-            # get that last line I missed
-            i = hexn * 6
-            lines.append(geom.LineString([self.points[i + 5], self.points[i]]))
-        # get the between-hexagon lines
-        for n in range(6):
-            lines.append(geom.LineString([self.points[n], self.points[n + 6]]))
+        p0 = self.points[0]
+        p6 = self.points[6]
+        if abs(p0['x'] - p6['x']) < self.tol and abs(p0['y'] - p6['y']) < self.tol:
+            # if it's vertical, only return the hexagon faces
+            # (for now)
+            for hexagon in range(2):
+                n0 = hexagon * 6
+                for i in range(5):
+                    n = n0 + i
+                    lines.append(geom.LineString([self.points[n], self.points[n + 1]]))
+                lines.append(geom.LineString([self.points[n0 + 5], self.points[n0]]))
+            # get the hexagons only-- no rectangles
+            for n in range(2):
+                i = n * 6
+                faces.append(geom.Polygon(list(self.points[i:(i + 6)])))
+        elif abs(p0['z'] - p6['z']) < self.tol:
+            # lying flat on its side-- not returning hexagon faces
+            if len(np.unique(self.points['z'])) == 4:
+                # It's rotated so that there's a ridge on the top, and
+                # the sides are vertical. Don't return any vertical
+                # rectangular sides
+                for n in range(5):
+                    p1 = self.points[n]
+                    p2 = self.points[n + 1]
+                    # is it a non-vertical rectangle?
+                    if abs(p1['x'] - p2['x']) >= self.tol and abs(p1['y'] - p2['y']) >= self.tol:
+                        faces.append(geom.Polygon([self.points[n], self.points[n + 1],
+                                                   self.points[n + 7], self.points[n + 6]]))
+                # get that last rectangle I missed
+                p1 = self.points[5]
+                p2 = self.points[0]
+                if abs(p1['x'] - p2['x']) >= self.tol and abs(p1['y'] - p2['y']) >= self.tol:
+                    faces.append(geom.Polygon([self.points[5], self.points[0],
+                                               self.points[6], self.points[11]]))
+                # get the lines around the hexagons
+                for hexagon in range(2):
+                    n0 = hexagon * 6
+                    for i in range(5):
+                        n = n0 + i
+                        p1 = self.points[n]
+                        p2 = self.points[n + 1]
+                        if abs(p1['x'] - p2['x']) >= self.tol and abs(p1['y'] - p2['y']) >= self.tol:
+                            lines.append(geom.LineString([self.points[n], self.points[n + 1]]))
+                    p1 = self.points[n0 + 5]
+                    p2 = self.points[n0]
+                    if abs(p1['x'] - p2['x']) >= self.tol and abs(p1['y'] - p2['y']) >= self.tol:
+                        lines.append(geom.LineString([self.points[n0 + 5], self.points[n0]]))
+                # get the between-hexagon lines
+                for n in range(6):
+                    lines.append(geom.LineString([self.points[n], self.points[n + 6]]))
+                
+                
+            # returning only rectangles
+            pass
+        else:
+            # return all the faces
 
-        # get the hexagons
-        for n in range(2):
-            i = n * 6
-            faces.append(geom.Polygon(list(self.points[i:(i + 6)])))
-        # get the rectangles
-        for n in range(5):
-            faces.append(geom.Polygon([self.points[n], self.points[n + 1],
-                                       self.points[n + 7], self.points[n + 6]]))
-        # get that last rectangle I missed
-        faces.append(geom.Polygon([self.points[5], self.points[0],
-                                   self.points[6], self.points[11]]))
-            
+            # get the lines around the hexagons
+            for hexagon in range(2):
+                n0 = hexagon * 6
+                for i in range(5):
+                    n = n0 + i
+                    lines.append(geom.LineString([self.points[n], self.points[n + 1]]))
+                lines.append(geom.LineString([self.points[n0 + 5], self.points[n0]]))
+            # get the between-hexagon lines
+            for n in range(6):
+                lines.append(geom.LineString([self.points[n], self.points[n + 6]]))
+            # get the hexagons
+            for n in range(2):
+                i = n * 6
+                faces.append(geom.Polygon(list(self.points[i:(i + 6)])))
+            # get the rectangles
+            for n in range(5):
+                faces.append(geom.Polygon([self.points[n], self.points[n + 1],
+                                           self.points[n + 7], self.points[n + 6]]))
+            # get that last rectangle I missed
+            faces.append(geom.Polygon([self.points[5], self.points[0],
+                                       self.points[6], self.points[11]]))
         
         # return the geometry representing the bottom side of the prism
 
@@ -443,6 +480,11 @@ class IceCluster:
         self.points[0] = crystal.points
         self.size = size
         self.ncrystals = 1
+        # used for some calculations involving shapely objects
+        self.tol = 10 ** -11
+        # Used for the fit_ellipse function. I really do not like that
+        # I have to set this so high, arrr.
+        self.tol_ellipse = 10 ** -4.5
 
     def crystals(self, i=None):
         # return a crystal with the same points and attributes as the
@@ -544,7 +586,10 @@ class IceCluster:
         points = self.points[n]
         p0 = points[0]
         p6 = points[6]
-        if p0['x'] == p6['x'] and p0['y'] == p6['y']:
+        # If differences are less than 'tol' we just consider them
+        # equal. I don't know why but these small values trip up
+        # shapely.
+        if abs(p0['x'] - p6['x']) < self.tol and abs(p0['y'] - p6['y']) < self.tol:
             # It's vertical, so just return one of the hexagons
             points2d = points[0:6]
         else:
@@ -554,7 +599,7 @@ class IceCluster:
             # midx = np.mean(self.points['x'])
             # midy = np.mean(self.points['y'])
 
-            if p0['z'] == p6['z']:
+            if abs(p0['z'] - p6['z']) < self.tol:
                 # It's lying flat (looks like a rectangle from above)
                 if len(np.unique(points['z'])) == 4:
                     # It's rotated so that there's a ridge on the top,
@@ -652,8 +697,7 @@ class IceCluster:
     def reorient(self, method='random', rotations=50):
         if method == 'IDL':
             # based on max_agg3.pro from IPAS
-            max_rot1 = None
-            max_area = self.projectxy().area
+            max_area = 0
             for i in range(rotations):
                 [a, b, c] = [np.random.uniform(high=np.pi / 4), np.random.uniform(high=np.pi / 4), np.random.uniform(high=np.pi / 4)]
                 # for mysterious reasons we are going to rotate this 3 times
@@ -673,20 +717,16 @@ class IceCluster:
                 self._rev_rotate(rot3)
                 self._rev_rotate(rot2)
                 self._rev_rotate(rot1)
-                # rotate new crystal to the area-maximizing rotation(s)
-            if max_rot1 is not None:
-                self._rotate(max_rot1)
-                self._rotate(max_rot2)
-                self._rotate(max_rot3)
-                # if none of the new rotations was better we can leave
-                # it at the original rotation
+            # rotate new crystal to the area-maximizing rotation(s)
+            self._rotate(max_rot1)
+            self._rotate(max_rot2)
+            self._rotate(max_rot3)
             self.rotation = [0, 0, 0]
             
         elif method == 'random':
             # same as schmitt but only rotating one time, with a real
             # random rotation
-            max_rot = None
-            max_area = self.projectxy().area
+            max_area = 0
             for i in range(rotations):
                 yrot = np.arccos(np.random.uniform(-1, 1)) - np.pi/2
                 rot = [np.random.uniform(high=2 * np.pi), yrot, np.random.uniform(high=2 * np.pi)]
@@ -696,10 +736,8 @@ class IceCluster:
                     max_area = new_area
                     max_rot = rot
                 self._rev_rotate(rot)
-            if max_rot is not None:
-                self._rotate(max_rot)
-                # if none of the new rotations was better we can leave
-                # it at the original rotation
+            # rotate new crystal to the area-maximizing rotation
+            self._rotate(max_rot)
             self.rotation = [0, 0, 0]
         
         # elif method == 'bh':
@@ -771,8 +809,10 @@ class IceCluster:
         yr = ordered_ymat[:, 2]
         # which slices have areas on the left and right sides of the
         # middle point?
-        left = xm != xl
-        right = xr != xm
+        # Ignore values smaller than 'tol' so we don't run into
+        # terrible problems with division.
+        left = xm - xl > self.tol_ellipse
+        right = xr - xm > self.tol_ellipse
         # slope and intercept of line connecting left and right points
         has_area = xr != xl
         m3 = np.zeros(npoints - 1)
@@ -865,10 +905,21 @@ class IceCluster:
         centroid = poly.centroid
         poly = sha.translate(poly, -centroid.x, -centroid.y)
 
-        moments = self._get_moments(poly)
-        xx = moments[0] / xy_area
-        yy = moments[1] / xy_area
-        xy = -moments[2] / xy_area
+        # occasionally we get multipolygons
+        if isinstance(poly, geom.MultiPolygon):
+            xx = 0
+            yy = 0
+            xy = 0
+            for poly2 in poly:
+                moments = self._get_moments(poly2)
+                xx += moments[0] / xy_area
+                yy += moments[1] / xy_area
+                xy -= moments[2] / xy_area
+        else:
+            moments = self._get_moments(poly)
+            xx = moments[0] / xy_area
+            yy = moments[1] / xy_area
+            xy = -moments[2] / xy_area
 
         # do magic
         m = np.matrix([[yy, xy], [xy, xx]])
