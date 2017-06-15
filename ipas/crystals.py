@@ -485,6 +485,9 @@ class IceCluster:
         # Used for the fit_ellipse function. I really do not like that
         # I have to set this so high, arrr.
         self.tol_ellipse = 10 ** -4.5
+        # to store axis lengths
+        self.major_axis = {}
+        self.minor_axis = {}
 
     def crystals(self, i=None):
         # return a crystal with the same points and attributes as the
@@ -997,15 +1000,13 @@ class IceCluster:
         # put the cluster back
         self.rotate_to(rotation)
 
-        major_lengths = {}
-        minor_lengths = {}
         for dim in ellipse.keys():
-            major_lengths[dim] = max(ellipse[dim]['height'], ellipse[dim]['width'])
-            minor_lengths[dim] = min(ellipse[dim]['height'], ellipse[dim]['width'])
+            self.major_axis[dim] = max(ellipse[dim]['height'], ellipse[dim]['width'])
+            self.minor_axis[dim] = min(ellipse[dim]['height'], ellipse[dim]['width'])
 
         if method == 1:
-            return max(major_lengths.values()) / max(minor_lengths.values())
+            return max(self.major_axis.values()) / max(self.minor_axis.values())
         elif method == 'plate':
-            return minor_lengths['y'] / major_lengths['z']
+            return self.minor_axis['y'] / self.major_axis['z']
         elif method == 'column':
-            return major_lengths['z'] / minor_lengths['y']
+            return self.major_axis['z'] / self.minor_axis['y']
