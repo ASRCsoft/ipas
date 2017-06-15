@@ -88,15 +88,22 @@ def sim_clusters(length, width, nclusters, ncrystals, reorient='random', rotatio
                 cluster.reorient(method=reorient, rotations=rotations)
         clusters.append(cluster)
     plates = width > length
-    return IceClusterBatch(clusters, plates)
+    return IceClusterBatch(clusters, length, width, plates)
 
 class IceClusterBatch:
     """A collection of IceCluster objects."""
     
-    def __init__(self, clusters, plates=None):
+    def __init__(self, clusters, length, width, plates=None):
+        self.length = length
+        self.width = width
+        if plates is None:
+            self.plates = width > length
+        else:
+            self.plates = plates # are they plates or columns?
         self.clusters = clusters
-        self.plates = plates # are they plates or columns?
         self.ratios = None
+        self.major_axis = {}
+        self.minor_axis = {}
 
     def calc_aspect_ratios(self):
         """Calculate the aspect ratios of the clusters using ellipses fitted
@@ -110,9 +117,14 @@ class IceClusterBatch:
             pass
         if self.plates:
             # if the crystals are plates do the plate version
-            ratios = [ cluster.aspect_ratio(method='plate') for cluster in self.clusters ]
+            ratios = [ cluster.aspect_ratio(method='plate') for cluster in self.clusters ]            
         else:
             ratios = [ cluster.aspect_ratio(method='column') for cluster in self.clusters ]
+        xyz = ['x', 'y', 'z']
+        for dim in xyz:
+            self.major_axis[dim] = [ cl.major_axis[dim] for cl in self.clusters ]
+            self.minor_axis[dim] = [ cl.minor_axis[dim] for cl in self.clusters ]
+            
         self.ratios = ratios
         return ratios
 
