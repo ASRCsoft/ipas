@@ -716,7 +716,7 @@ class IceCluster:
                     max_rot1 = rot1
                     max_rot2 = rot2
                     max_rot3 = rot3
-                    # now rotate back -- this is fun!
+                # now rotate back -- this is fun!
                 self._rev_rotate(rot3)
                 self._rev_rotate(rot2)
                 self._rev_rotate(rot1)
@@ -811,9 +811,8 @@ class IceCluster:
         ym = ordered_ymat[:, 1]
         yr = ordered_ymat[:, 2]
         # which slices have areas on the left and right sides of the
-        # middle point?
-        # Ignore values smaller than 'tol' so we don't run into
-        # terrible problems with division.
+        # middle point? Ignore values smaller than 'tol' so we don't
+        # run into terrible problems with division.
         left = xm - xl > self.tol_ellipse
         right = xr - xm > self.tol_ellipse
         # slope and intercept of line connecting left and right points
@@ -888,7 +887,7 @@ class IceCluster:
             xxtotal *= -1
             yytotal *= -1
             xytotal *= -1
-            # also need to account for the holes, if they exist
+        # also need to account for the holes, if they exist
         for linestring in list(poly.interiors):
             hole = geom.Polygon(linestring)
             hole_moments = self._get_moments(hole)
@@ -969,21 +968,23 @@ class IceCluster:
 
         faces = []
         for i, crystal in enumerate(self.crystals()):
+            nc = i * 12
             # write the vertices
             for n in range(12):
                 f.write('v ' + ' '.join(map(str, crystal.points[n])) + '\n')
-                # write the hexagons
-            nc = i * 12
+            # write the hexagons
             for n in range(2):
                 coords = range(n * 6 + 1 + nc, (n + 1) * 6 + 1 + nc)
                 faces.append('f ' + ' '.join(map(str, coords)))
+            # write the rectangles
             for n in range(5):
                 coords = [n + 1 + nc, n + 2 + nc, n + 8 + nc, n + 7 + nc]
                 faces.append('f ' + ' '.join(map(str, coords)))
-                coords = [nc + 6, nc + 1, nc + 7, nc + 12]
-                faces.append('f ' + ' '.join(map(str, coords)))
-                f.write('\n'.join(faces))
-                f.close()
+            # write the last rectangle I missed
+            coords = [nc + 6, nc + 1, nc + 7, nc + 12]
+            faces.append('f ' + ' '.join(map(str, coords)))
+        f.write('\n'.join(faces))
+        f.close()
 
     def aspect_ratio(self, method):
         rotation = self.rotation
