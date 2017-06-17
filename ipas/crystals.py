@@ -2,9 +2,10 @@
 (aggregates).
 
 """
-
+import copy as cp
 import numpy as np
 import scipy.optimize as opt
+from pyquaternion import Quaternion
 import shapely.geometry as geom
 import shapely.ops as shops
 import shapely.affinity as sha
@@ -36,11 +37,11 @@ class IceCrystal:
         #          [mf*f   ,mf*f   ,0.    ,-mf*f ,-mf*f  ,0.     ,mf*f   ,mf*f   ,0.     ,-mf*f  ,-mf*f  ,0.]]
 
         self.center = [0, 0, 0] # start the crystal at the origin
-        self._rotate(rotation) # rotate the crystal
-        self.rotation = rotation
-        self.move(center) # move the crystal
+        self.rotation = Quaternion()
+        self.rotate_to(rotation) # rotate the crystal
         self.maxz = self.points['z'].max()
         self.minz = self.points['z'].min()
+        self.move(center) # move the crystal
         self.tol = 10 ** -11 # used for some calculations
 
     def move(self, xyz):
@@ -54,100 +55,71 @@ class IceCrystal:
         self.maxz += xyz[2]
         self.minz += xyz[2]
 
-    def _rotate(self, angles):
-        # do the new rotation:
-        [x, y, z] = [self.points['x'], self.points['y'], self.points['z']]
-        [y, z] = [y * np.cos(angles[0]) - z * np.sin(angles[0]), y * np.sin(angles[0]) + z * np.cos(angles[0])]
-        [x, z] = [x * np.cos(angles[1]) + z * np.sin(angles[1]), -x * np.sin(angles[1]) + z * np.cos(angles[1])]
-        [x, y] = [x * np.cos(angles[2]) - y * np.sin(angles[2]), x * np.sin(angles[2]) + y * np.cos(angles[2])]
-        # update the crystal's points:
-        self.points['x'] = x
-        self.points['y'] = y
-        self.points['z'] = z
-        # update the crystal's rotation:
-        #self.rotation = angles
-        # update max and min
-        self.maxz = z.max()
-        self.minz = z.min()
-        # update the crystal's center:
-        self.center[0] = (x.max() + x.min()) / 2
-        self.center[1] = (y.max() + y.min()) / 2
-        self.center[2] = (self.maxz + self.minz) / 2
+    def _rotate_mat(self, mat):
+        points = cp.copy(self.points)
+        self.points['x'] = points['x'] * mat[0, 0] + points['y'] * mat[0, 1] + points['z'] * mat[0, 2]
+        self.points['y'] = points['x'] * mat[1, 0] + points['y'] * mat[1, 1] + points['z'] * mat[1, 2]
+        self.points['z'] = points['x'] * mat[2, 0] + points['y'] * mat[2, 1] + points['z'] * mat[2, 2]
         # old IDL code:
         # pt1r1=[point(0),point(1)*cos(angle(0))-point(2)*sin(angle(0)),point(1)*sin(angle(0))+point(2)*cos(angle(0))]
         # pt1r2=[pt1r1(0)*cos(angle(1))+pt1r1(2)*sin(angle(1)),pt1r1(1),-pt1r1(0)*sin(angle(1))+pt1r1(2)*cos(angle(1))]
         # pt1r3=[pt1r2(0)*cos(angle(2))-pt1r2(1)*sin(angle(2)),pt1r2(0)*sin(angle(2))+pt1r2(1)*cos(angle(2)),pt1r2(2)]
 
-    def _rev_rotate(self, angles):
-        # undo a rotation (same as above but in negative and in reverse order):
-        angles = [-x for x in angles ]
-        [x, y, z] = [self.points['x'], self.points['y'], self.points['z']]
-        [x, y] = [x * np.cos(angles[2]) - y * np.sin(angles[2]), x * np.sin(angles[2]) + y * np.cos(angles[2])]
-        [x, z] = [x * np.cos(angles[1]) + z * np.sin(angles[1]), -x * np.sin(angles[1]) + z * np.cos(angles[1])]
-        [y, z] = [y * np.cos(angles[0]) - z * np.sin(angles[0]), y * np.sin(angles[0]) + z * np.cos(angles[0])]
-
-        # update the crystal's points:
-        self.points['x'] = x
-        self.points['y'] = y
-        self.points['z'] = z
-        # update the crystal's rotation:
-        #self.rotation = angles
-        # update max and min
-        self.maxz = z.max()
-        self.minz = z.min()
-        # update the crystal's center:
-        self.center[0] = (x.max() + x.min()) / 2
-        self.center[1] = (y.max() + y.min()) / 2
-        self.center[2] = (self.maxz + self.minz) / 2
+    def _euler_to_mat(self, xyz):
+        [x, y, z] = xyz
+        rx = np.matrix([[1, 0, 0], [0, np.cos(x), -np.sin(x)], [0, np.sin(x), np.cos(x)]])
+        ry = np.matrix([[np.cos(y), 0, np.sin(y)], [0, 1, 0], [-np.sin(y), 0, np.cos(y)]])
+        rz = np.matrix([[np.cos(z), -np.sin(z), 0], [np.sin(z), np.cos(z), 0], [0, 0, 1]])
+        return rx * ry * rz
 
     def rotate_to(self, angles):
         # rotate to the orientation given by the 3 angles
 
-        # first undo the current rotation
-        self._rev_rotate(self.rotation)
+        # get the rotation from the current position to the desired
+        # rotation
+        current_rot = self.rotation
+        rmat = self._euler_to_mat(angles)
+        desired_rot = Quaternion(matrix=rmat)
+        rot_mat = (desired_rot * current_rot.inverse).rotation_matrix
+        self._rotate_mat(rot_mat)
 
-        # now do the new rotation
-        self._rotate(angles)
+        # update the crystal's center:
+        xyz = ['x', 'y', 'z']
+        for n in range(3):
+            self.center[n] = self.points[xyz[n]].mean()
+            # update max and min
+        self.maxz = self.points['z'].max()
+        self.minz = self.points['z'].min()
 
         # save the new rotation
-        self.rotation = angles
+        self.rotation = desired_rot
 
     def reorient(self, method='random', rotations=50):
         if method == 'IDL':
             # based on max_area2.pro from IPAS
-            # max_area = self.projectxy().area
-            # max_rot1 = None
             max_area = 0
+            current_rot = self.rotation
             for i in range(rotations):
                 [a, b, c] = [np.random.uniform(high=np.pi), np.random.uniform(high=np.pi), np.random.uniform(high=np.pi)]
                 # for mysterious reasons we are going to rotate this 3 times
-                rot1 = [a, b, c]
-                rot2 = [b * np.pi, c * np.pi, a * np.pi]
-                rot3 = [c * np.pi * 2, a * np.pi * 2, b * np.pi * 2]
-                self._rotate(rot1)
-                self._rotate(rot2)
-                self._rotate(rot3)
+                rot1 = self._euler_to_mat([a, b, c])
+                rot2 = self._euler_to_mat([b * np.pi, c * np.pi, a * np.pi])
+                rot3 = self._euler_to_mat([c * np.pi * 2, a * np.pi * 2, b * np.pi * 2])
+                desired_rot = Quaternion(matrix=rot1 * rot2 * rot3)
+                rot_mat = (desired_rot * current_rot.inverse).rotation_matrix
+                self._rotate_mat(rot_mat)
                 new_area = self.projectxy().area
                 if new_area > max_area:
                     max_area = new_area
-                    max_area = new_area
-                    max_rot1 = rot1
-                    max_rot2 = rot2
-                    max_rot3 = rot3
-                # now rotate back -- this is fun!
-                self._rev_rotate(rot3)
-                self._rev_rotate(rot2)
-                self._rev_rotate(rot1)
+                    max_rot = desired_rot
+                # save our spot
+                current_rot = desired_rot
             # rotate new crystal to the area-maximizing rotation
-            self._rotate(max_rot1)
-            self._rotate(max_rot2)
-            self._rotate(max_rot3)
-            self.rotation = [0, 0, 0] # set this new rotation as the default
+            rot_mat = (max_rot * current_rot.inverse).rotation_matrix
+            self._rotate_mat(rot_mat)
         elif method == 'random':
-            # same as schmitt but only rotating one time, with a real
+            # same as IDL but only rotating one time, with a real
             # random rotation
-            # max_rot = None
-            # max_area = self.projectxy().area
             max_area = 0
             for i in range(rotations):
                 yrot = np.arccos(np.random.uniform(-1, 1)) - np.pi / 2
@@ -160,7 +132,7 @@ class IceCrystal:
                 self._rev_rotate(rot)
             # rotate new crystal to the area-maximizing rotation
             self._rotate(max_rot)
-            self.rotation = [0, 0, 0]
+        self.rotation = Quaternion() # set this new rotation as the default
 
     def plot(self):
         # return a multiline object representing the edges of the prism
@@ -474,7 +446,7 @@ class IceCrystal:
 class IceCluster:
     def __init__(self, crystal, size=1):
         # needed for bookkeeping:
-        self.rotation = [0, 0, 0]
+        self.rotation = Quaternion()
         self.points = np.full((size, 12), np.nan,
                               dtype=[('x', float), ('y', float), ('z', float)])
         self.points[0] = crystal.points
@@ -538,39 +510,66 @@ class IceCluster:
     def min(self, dim):
         return self.points[dim][:self.ncrystals].min()
 
-    def _rotate(self, angles):
-        [x, y, z] = [self.points[:self.ncrystals]['x'], self.points[:self.ncrystals]['y'], self.points[:self.ncrystals]['z']]
-        [y, z] = [y * np.cos(angles[0]) - z * np.sin(angles[0]), y * np.sin(angles[0]) + z * np.cos(angles[0])]
-        [x, z] = [x * np.cos(angles[1]) + z * np.sin(angles[1]), -x * np.sin(angles[1]) + z * np.cos(angles[1])]
-        [x, y] = [x * np.cos(angles[2]) - y * np.sin(angles[2]), x * np.sin(angles[2]) + y * np.cos(angles[2])]
-        # update the crystal's points:
-        self.points['x'][:self.ncrystals] = x
-        self.points['y'][:self.ncrystals] = y
-        self.points['z'][:self.ncrystals] = z
+    # def _rotate(self, angles):
+    #     [x, y, z] = [self.points[:self.ncrystals]['x'], self.points[:self.ncrystals]['y'], self.points[:self.ncrystals]['z']]
+    #     [y, z] = [y * np.cos(angles[0]) - z * np.sin(angles[0]), y * np.sin(angles[0]) + z * np.cos(angles[0])]
+    #     [x, z] = [x * np.cos(angles[1]) + z * np.sin(angles[1]), -x * np.sin(angles[1]) + z * np.cos(angles[1])]
+    #     [x, y] = [x * np.cos(angles[2]) - y * np.sin(angles[2]), x * np.sin(angles[2]) + y * np.cos(angles[2])]
+    #     # update the crystal's points:
+    #     self.points['x'][:self.ncrystals] = x
+    #     self.points['y'][:self.ncrystals] = y
+    #     self.points['z'][:self.ncrystals] = z
 
-    def _rev_rotate(self, angles):
-        angles = [-x for x in angles ]
-        [x, y, z] = [self.points[:self.ncrystals]['x'], self.points[:self.ncrystals]['y'], self.points[:self.ncrystals]['z']]
-        [x, y] = [x * np.cos(angles[2]) - y * np.sin(angles[2]), x * np.sin(angles[2]) + y * np.cos(angles[2])]
-        [x, z] = [x * np.cos(angles[1]) + z * np.sin(angles[1]), -x * np.sin(angles[1]) + z * np.cos(angles[1])]
-        [y, z] = [y * np.cos(angles[0]) - z * np.sin(angles[0]), y * np.sin(angles[0]) + z * np.cos(angles[0])]
-        # update the crystal's points:
-        self.points['x'][:self.ncrystals] = x
-        self.points['y'][:self.ncrystals] = y
-        self.points['z'][:self.ncrystals] = z
+    # def _rev_rotate(self, angles):
+    #     angles = [-x for x in angles ]
+    #     [x, y, z] = [self.points[:self.ncrystals]['x'], self.points[:self.ncrystals]['y'], self.points[:self.ncrystals]['z']]
+    #     [x, y] = [x * np.cos(angles[2]) - y * np.sin(angles[2]), x * np.sin(angles[2]) + y * np.cos(angles[2])]
+    #     [x, z] = [x * np.cos(angles[1]) + z * np.sin(angles[1]), -x * np.sin(angles[1]) + z * np.cos(angles[1])]
+    #     [y, z] = [y * np.cos(angles[0]) - z * np.sin(angles[0]), y * np.sin(angles[0]) + z * np.cos(angles[0])]
+    #     # update the crystal's points:
+    #     self.points['x'][:self.ncrystals] = x
+    #     self.points['y'][:self.ncrystals] = y
+    #     self.points['z'][:self.ncrystals] = z
+
+    def _euler_to_mat(self, xyz):
+        [x, y, z] = xyz
+        rx = np.matrix([[1, 0, 0], [0, np.cos(x), -np.sin(x)], [0, np.sin(x), np.cos(x)]])
+        ry = np.matrix([[np.cos(y), 0, np.sin(y)], [0, 1, 0], [-np.sin(y), 0, np.cos(y)]])
+        rz = np.matrix([[np.cos(z), -np.sin(z), 0], [np.sin(z), np.cos(z), 0], [0, 0, 1]])
+        return rx * ry * rz
+
+    def _rotate_mat(self, mat):
+        points = cp.copy(self.points)
+        self.points['x'] = points['x'] * mat[0, 0] + points['y'] * mat[0, 1] + points['z'] * mat[0, 2]
+        self.points['y'] = points['x'] * mat[1, 0] + points['y'] * mat[1, 1] + points['z'] * mat[1, 2]
+        self.points['z'] = points['x'] * mat[2, 0] + points['y'] * mat[2, 1] + points['z'] * mat[2, 2]
 
     def rotate_to(self, angles):
-        # rotate the entire cluster
+        # rotate to the orientation given by the 3 angles
 
-        # first get back to the original rotation
-        if any(np.array(self.rotation) != 0):
-            self._rev_rotate(self.rotation)
-
-        # now add the new rotation
-        self._rotate(angles)
+        # get the rotation from the current position to the desired
+        # rotation
+        current_rot = self.rotation
+        rmat = self._euler_to_mat(angles)
+        desired_rot = Quaternion(matrix=rmat)
+        rot_mat = (desired_rot * current_rot.inverse).rotation_matrix
+        self._rotate_mat(rot_mat)
 
         # save the new rotation
-        self.rotation = angles
+        self.rotation = desired_rot
+
+    # def rotate_to(self, angles):
+    #     # rotate the entire cluster
+
+    #     # first get back to the original rotation
+    #     if any(np.array(self.rotation) != 0):
+    #         self._rev_rotate(self.rotation)
+
+    #     # now add the new rotation
+    #     self._rotate(angles)
+
+    #     # save the new rotation
+    #     self.rotation = angles
 
     def center_of_mass(self):
         x = np.mean(self.points[:self.ncrystals]['x'])
@@ -701,31 +700,25 @@ class IceCluster:
         if method == 'IDL':
             # based on max_agg3.pro from IPAS
             max_area = 0
+            current_rot = self.rotation
             for i in range(rotations):
                 [a, b, c] = [np.random.uniform(high=np.pi / 4), np.random.uniform(high=np.pi / 4), np.random.uniform(high=np.pi / 4)]
                 # for mysterious reasons we are going to rotate this 3 times
-                rot1 = [a, b, c]
-                rot2 = [b * np.pi, c * np.pi, a * np.pi]
-                rot3 = [c * np.pi * 2, a * np.pi * 2, b * np.pi * 2]
-                self._rotate(rot1)
-                self._rotate(rot2)
-                self._rotate(rot3)
+                rot1 = self._euler_to_mat([a, b, c])
+                rot2 = self._euler_to_mat([b * np.pi, c * np.pi, a * np.pi])
+                rot3 = self._euler_to_mat([c * np.pi * 2, a * np.pi * 2, b * np.pi * 2])
+                desired_rot = Quaternion(matrix=rot1 * rot2 * rot3)
+                rot_mat = (desired_rot * current_rot.inverse).rotation_matrix
+                self._rotate_mat(rot_mat)
                 new_area = self.projectxy().area
                 if new_area > max_area:
                     max_area = new_area
-                    max_rot1 = rot1
-                    max_rot2 = rot2
-                    max_rot3 = rot3
-                # now rotate back -- this is fun!
-                self._rev_rotate(rot3)
-                self._rev_rotate(rot2)
-                self._rev_rotate(rot1)
-            # rotate new crystal to the area-maximizing rotation(s)
-            self._rotate(max_rot1)
-            self._rotate(max_rot2)
-            self._rotate(max_rot3)
-            self.rotation = [0, 0, 0]
-            
+                    max_rot = desired_rot
+                # save our spot
+                current_rot = desired_rot
+            # rotate new crystal to the area-maximizing rotation
+            rot_mat = (max_rot * current_rot.inverse).rotation_matrix
+            self._rotate_mat(rot_mat)
         elif method == 'random':
             # same as schmitt but only rotating one time, with a real
             # random rotation
@@ -741,7 +734,7 @@ class IceCluster:
                 self._rev_rotate(rot)
             # rotate new crystal to the area-maximizing rotation
             self._rotate(max_rot)
-            self.rotation = [0, 0, 0]
+        self.rotation = Quaternion()
         
         # elif method == 'bh':
         #     # use a basin-hopping algorithm to look for the optimal rotation
@@ -987,7 +980,7 @@ class IceCluster:
         f.close()
 
     def aspect_ratio(self, method):
-        rotation = self.rotation
+        # rotation = self.rotation
         
         # getting ellipse axes from 3 perspectives
         ellipse = {}
@@ -999,7 +992,7 @@ class IceCluster:
         ellipse['x'] = self.fit_ellipse()
         
         # put the cluster back
-        self.rotate_to(rotation)
+        self.rotate_to([0, 0, 0])
 
         for dim in ellipse.keys():
             self.major_axis[dim] = max(ellipse[dim]['height'], ellipse[dim]['width'])
