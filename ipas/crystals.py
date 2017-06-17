@@ -776,7 +776,7 @@ class IceCluster:
         yytotal = np.sum(yy)
         xytotal = np.sum(xy)
         # and if the points were in clockwise order, flip the sign
-        if np.sum(cross_prods) < 0:
+        if not poly.exterior.is_ccw:
             xxtotal *= -1
             yytotal *= -1
             xytotal *= -1
