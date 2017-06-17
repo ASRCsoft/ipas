@@ -121,17 +121,20 @@ class IceCrystal:
             # same as IDL but only rotating one time, with a real
             # random rotation
             max_area = 0
+            current_rot = self.rotation
             for i in range(rotations):
-                yrot = np.arccos(np.random.uniform(-1, 1)) - np.pi / 2
-                rot = [np.random.uniform(high=2 * np.pi), yrot, np.random.uniform(high=2 * np.pi)]
-                self._rotate(rot)
+                desired_rot = Quaternion.random()
+                rot_mat = (desired_rot * current_rot.inverse).rotation_matrix
+                self._rotate_mat(rot_mat)
                 new_area = self.projectxy().area
                 if new_area > max_area:
                     max_area = new_area
-                    max_rot = rot
-                self._rev_rotate(rot)
+                    max_rot = desired_rot
+                # save our spot
+                current_rot = desired_rot
             # rotate new crystal to the area-maximizing rotation
-            self._rotate(max_rot)
+            rot_mat = (max_rot * current_rot.inverse).rotation_matrix
+            self._rotate_mat(rot_mat)
         self.rotation = Quaternion() # set this new rotation as the default
 
     def plot(self):
@@ -617,17 +620,20 @@ class IceCluster:
             # same as schmitt but only rotating one time, with a real
             # random rotation
             max_area = 0
+            current_rot = self.rotation
             for i in range(rotations):
-                yrot = np.arccos(np.random.uniform(-1, 1)) - np.pi/2
-                rot = [np.random.uniform(high=2 * np.pi), yrot, np.random.uniform(high=2 * np.pi)]
-                self._rotate(rot)
+                desired_rot = Quaternion.random()
+                rot_mat = (desired_rot * current_rot.inverse).rotation_matrix
+                self._rotate_mat(rot_mat)
                 new_area = self.projectxy().area
                 if new_area > max_area:
                     max_area = new_area
-                    max_rot = rot
-                self._rev_rotate(rot)
+                    max_rot = desired_rot
+                # save our spot
+                current_rot = desired_rot
             # rotate new crystal to the area-maximizing rotation
-            self._rotate(max_rot)
+            rot_mat = (max_rot * current_rot.inverse).rotation_matrix
+            self._rotate_mat(rot_mat)
         self.rotation = Quaternion()
         
         # elif method == 'bh':

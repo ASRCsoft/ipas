@@ -11,6 +11,7 @@ setup(
     install_requires=[
         'shapely >= 1.5',
         'numpy >= 1.12',
-        'scipy >= 0.17'
+        'scipy >= 0.17',
+        'pyquaternion >= 0.9'
     ]
 )
