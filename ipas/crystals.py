@@ -175,61 +175,9 @@ class IceCrystal:
             lines.append(geom.LineString([hex1[n], hex2[n]]))
 
         return geom.MultiLineString(lines)
-
+    
     def projectxy(self):
-        # project the points onto a 2d surface, return a polygon
-
-        # try using points instead of rotation in the if statements
-        p0 = self.points[0]
-        p6 = self.points[6]
-        if p0['x'] == p6['x'] and p0['y'] == p6['y']:
-            # It's vertical, so just return one of the hexagons
-            points2d = self.points[0:6]
-        else:
-            # prism is lying flat or tilted sideways
-            midx = self.center[0]
-            midy = self.center[1]
-            # midx = np.mean(self.points['x'])
-            # midy = np.mean(self.points['y'])
-
-            if p0['z'] == p6['z']:
-                # It's lying flat (looks like a rectangle from above)
-                if len(np.unique(self.points['z'])) == 4:
-                    # It's rotated so that there's a ridge on the top,
-                    # and the sides are vertical. Ignore the two
-                    # highest points (the top ridge), get the next set
-                    # of 4 points.
-                    points2d = self.points[np.argsort(-self.points['z'])[2:6]]
-                else:
-                    # find the 4 points farthest from the center
-                    distances = np.sqrt((self.points['x'] - midx) ** 2 + (self.points['y'] - midy) ** 2)
-                    points2d = self.points[np.argsort(-distances)[0:4]]
-            else:
-                # prism is tilted. Remove the two highest points from
-                # the upper hexagon and the two lowest points from the
-                # lower hexagon-- they'll always be inside the
-                # resulting 2D octagon!
-                hex1 = self.points[0:6]
-                hex2 = self.points[6:12]
-                if hex1['z'].max() > hex2['z'].max():
-                    upperhex = hex1
-                    lowerhex = hex2
-                else:
-                    upperhex = hex2
-                    lowerhex = hex1
-                upperhex = upperhex[np.argsort(upperhex['z'])[0:4]]
-                lowerhex = lowerhex[np.argsort(lowerhex['z'])[2:6]]
-                points2d = np.concatenate([upperhex, lowerhex])
-
-            # Get the angle of the line connecting the midpoint (which
-            # is always inside the 2d projection) to each point, then
-            # sort counterclockwise. This ensures that the points are
-            # connected in the right order.
-            angles = np.arctan2(points2d['y'] - midy, points2d['x'] - midx)
-            points2d = points2d[np.argsort(angles)]
-            
-        # take away the z-values-- now it's 2D! return polygon
-        return geom.Polygon(list(points2d[['x', 'y']]))
+        return geom.MultiPoint(self.points[['x', 'y']]).convex_hull
 
     def bottom(self):
         # just return everything for now until I get better code
@@ -585,61 +533,7 @@ class IceCluster:
         return geom.MultiLineString([ lines for crystal in self.crystals() for lines in crystal.plot() ])
 
     def _crystal_projectxy(self, n):
-        # try using points instead of rotation in the if statements
-        points = self.points[n]
-        p0 = points[0]
-        p6 = points[6]
-        # If differences are less than 'tol' we just consider them
-        # equal. I don't know why but these small values trip up
-        # shapely.
-        if abs(p0['x'] - p6['x']) < self.tol and abs(p0['y'] - p6['y']) < self.tol:
-            # It's vertical, so just return one of the hexagons
-            points2d = points[0:6]
-        else:
-            # prism is lying flat or tilted sideways
-            midx = points['x'].mean()
-            midy = points['y'].mean()
-            # midx = np.mean(self.points['x'])
-            # midy = np.mean(self.points['y'])
-
-            if abs(p0['z'] - p6['z']) < self.tol:
-                # It's lying flat (looks like a rectangle from above)
-                if len(np.unique(points['z'])) == 4:
-                    # It's rotated so that there's a ridge on the top,
-                    # and the sides are vertical. Ignore the two
-                    # highest points (the top ridge), get the next set
-                    # of 4 points.
-                    points2d = points[np.argsort(-points['z'])[2:6]]
-                else:
-                    # find the 4 points farthest from the center
-                    distances = np.sqrt((points['x'] - midx) ** 2 + (points['y'] - midy) ** 2)
-                    points2d = points[np.argsort(-distances)[0:4]]
-            else:
-                # prism is tilted. Remove the two highest points from
-                # the upper hexagon and the two lowest points from the
-                # lower hexagon-- they'll always be inside the
-                # resulting 2D octagon!
-                hex1 = points[0:6]
-                hex2 = points[6:12]
-                if hex1['z'].max() > hex2['z'].max():
-                    upperhex = hex1
-                    lowerhex = hex2
-                else:
-                    upperhex = hex2
-                    lowerhex = hex1
-                upperhex = upperhex[np.argsort(upperhex['z'])[0:4]]
-                lowerhex = lowerhex[np.argsort(lowerhex['z'])[2:6]]
-                points2d = np.concatenate([upperhex, lowerhex])
-
-            # Get the angle of the line connecting the midpoint (which
-            # is always inside the 2d projection) to each point, then
-            # sort counterclockwise. This ensures that the points are
-            # connected in the right order.
-            angles = np.arctan2(points2d['y'] - midy, points2d['x'] - midx)
-            points2d = points2d[np.argsort(angles)]
-            
-        # take away the z-values-- now it's 2D! return polygon
-        return geom.Polygon(list(points2d[['x', 'y']]))
+        return geom.MultiPoint(self.points[n][['x', 'y']]).convex_hull
 
     def projectxy(self):
         polygons = [ self._crystal_projectxy(n) for n in range(self.ncrystals) ]
