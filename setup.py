@@ -9,7 +9,7 @@ setup(
     author_email='williamcmay@live.com',
     packages=['ipas'],
     install_requires=[
-        'shapely >= 1.5',
+        'shapely == 1.6b4',
         'numpy >= 1.12',
         'scipy >= 0.17',
         'pyquaternion >= 0.9'
