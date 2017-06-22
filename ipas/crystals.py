@@ -407,7 +407,7 @@ class IceCluster:
         self.tol = 10 ** -11
         # Used for the fit_ellipse function. I really do not like that
         # I have to set this so high, arrr.
-        self.tol_ellipse = 10 ** -4.5
+        self.tol_ellipse = 10 ** -6
         # to store axis lengths
         self.major_axis = {}
         self.minor_axis = {}
@@ -683,26 +683,33 @@ class IceCluster:
         #     self.rotation = [0, 0, 0]
         #     return opt_rot
 
+    # def _cube_diff(self, x1, x2):
+    #     """Substract one cube from another without actually calculating any
+    #     cubes (this helps to avoid numerical issues with large
+    #     numbers)
+    #     """
+    #     diffs = x1 - x2
+    #     return 3 * x2 ** 2 * diffs + 3 * x2 * diffs ** 2 + diffs ** 3
+
+    def _sort_coords(self, xys):
+        n_slices = len(xys[0]) - 1
+        # values for the three points-- point[n], point[n+1], and
+        # (0,0)-- making up triangular slices from the origin to the
+        # edges of the polygon
+        xmat = np.array([xys[0][0:-1], xys[0][1:], np.zeros(n_slices)]).transpose()
+        ymat = np.array([xys[1][0:-1], xys[1][1:], np.zeros(n_slices)]).transpose()
+        # arrange the points in left-center-right order
+        x_order = np.argsort(xmat, axis=1)
+        ordered_xmat = xmat[np.array([range(n_slices)]).transpose(), x_order]
+        ordered_ymat = ymat[np.array([range(n_slices)]).transpose(), x_order]
+        return ordered_xmat[:, 0], ordered_xmat[:, 1], ordered_xmat[:, 2], ordered_ymat[:, 0], ordered_ymat[:, 1], ordered_ymat[:, 2]
+
     def _get_moments(self, poly):
         # get 'mass moments' for this cluster's 2D polygon using a
         # variation of the shoelace algorithm
         xys = poly.exterior.coords.xy
-        npoints = len(xys[0])
-        # values for the three points-- point[n], point[n+1], and
-        # (0,0)-- making up triangular slices from the origin to the
-        # edges of the polygon
-        xmat = np.array([xys[0][0:-1], xys[0][1:], np.zeros(npoints - 1)]).transpose()
-        ymat = np.array([xys[1][0:-1], xys[1][1:], np.zeros(npoints - 1)]).transpose()
-        # arrange the points in left-center-right order
-        x_order = np.argsort(xmat, axis=1)
-        ordered_xmat = xmat[np.array([range(npoints - 1)]).transpose(), x_order]
-        ordered_ymat = ymat[np.array([range(npoints - 1)]).transpose(), x_order]
-        xl = ordered_xmat[:, 0]
-        xm = ordered_xmat[:, 1]
-        xr = ordered_xmat[:, 2]
-        yl = ordered_ymat[:, 0]
-        ym = ordered_ymat[:, 1]
-        yr = ordered_ymat[:, 2]
+        n_slices = len(xys[0]) - 1
+        xl, xm, xr, yl, ym, yr = self._sort_coords(xys)
         # which slices have areas on the left and right sides of the
         # middle point? Ignore values smaller than 'tol' so we don't
         # run into terrible problems with division.
@@ -710,7 +717,7 @@ class IceCluster:
         right = xr - xm > self.tol_ellipse
         # slope and intercept of line connecting left and right points
         has_area = xr != xl
-        m3 = np.zeros(npoints - 1)
+        m3 = np.zeros(n_slices)
         m3[has_area] = (yr[has_area] - yl[has_area]) / (xr[has_area] - xl[has_area])
         b3 = -xl * m3 + yl
         # the y coordinate of the line connecting the left and right
@@ -726,9 +733,9 @@ class IceCluster:
         b2 = -xr[right] * m2 + yr[right]
         # now that we have the points in a nice format + helpful
         # information we can calculate the integrals of the slices
-        xx = np.zeros(npoints - 1)
-        xy = np.zeros(npoints - 1)
-        yy = np.zeros(npoints - 1)
+        xx = np.zeros(n_slices)
+        xy = np.zeros(n_slices)
+        yy = np.zeros(n_slices)
         dxl = (xm[left] - xl[left])
         dx2l = (xm[left] ** 2 - xl[left] ** 2)
         dx3l = (xm[left] ** 3 - xl[left] ** 3)
@@ -749,20 +756,56 @@ class IceCluster:
         xy[right] += dx4r * (m2 ** 2 - m3[right] ** 2) / 8 +\
                      dx3r * (b2 * m2 - b3[right] * m3[right]) / 3 +\
                      dx2r * (b2 ** 2 - b3[right] ** 2) / 4
-        # y^2
-        yy[left] = dx4l * (m1 ** 3 - m3[left] ** 3) / 12 +\
-                   dx3l * (b1 * m1 ** 2 - b3[left] * m3[left] ** 2) / 3 +\
-                   dx2l * (b1 ** 2 * m1 - b3[left] ** 2 * m3[left]) / 2 +\
-                   dxl * (b1 ** 3 - b3[left] ** 3) / 3
-        yy[right] += dx4r * (m2 ** 3 - m3[right] ** 3) / 12 +\
-                     dx3r * (b2 * m2 ** 2- b3[right] * m3[right] ** 2) / 3 +\
-                     dx2r * (b2 ** 2 * m2 - b3[right] ** 2 * m3[right]) / 2 +\
-                     dxr * (b2 ** 3 - b3[right] ** 3) / 3
         # if the middle point was below the other points, multiply by
         # minus 1
         xx[mid_below] *= -1
         xy[mid_below] *= -1
+
+        # # y^2
+        # yy[left] = dx4l * self._cube_diff(m1, m3[left]) / 12 +\
+        #            dx3l * (b1 * m1 ** 2 - b3[left] * m3[left] ** 2) / 3 +\
+        #            dx2l * (b1 ** 2 * m1 - b3[left] ** 2 * m3[left]) / 2 +\
+        #            dxl * self._cube_diff(b1, b3[left]) / 3
+        # yy[right] += dx4r * self._cube_diff(m2, m3[right]) / 12 +\
+        #              dx3r * (b2 * m2 ** 2 - b3[right] * m3[right] ** 2) / 3 +\
+        #              dx2r * (b2 ** 2 * m2 - b3[right] ** 2 * m3[right]) / 2 +\
+        #              dxr * self._cube_diff(b2, b3[right]) / 3
+        
+        # For numerical reasons instead of integrating y^2, I'm just
+        # going to transpose the coordinates and integrate over x^2
+        # again. This requires recalculating all of the supporting
+        # info...
+        xl, xm, xr, yl, ym, yr = self._sort_coords([xys[1], xys[0]])
+        left = xm - xl > self.tol_ellipse
+        right = xr - xm > self.tol_ellipse
+        # slope and intercept of line connecting left and right points
+        has_area = xr != xl
+        m3 = np.zeros(n_slices)
+        m3[has_area] = (yr[has_area] - yl[has_area]) / (xr[has_area] - xl[has_area])
+        b3 = -xl * m3 + yl
+        # the y coordinate of the line connecting the left and right
+        # points at the x position of the middle point
+        m3_mid = yl + m3 * (xm - xl)
+        # is the midpoint above or below that line?
+        mid_below = ym < m3_mid
+        # line connecting left and middle point (where applicable)
+        m1 = (ym[left] - yl[left]) / (xm[left] - xl[left])
+        b1 = -xl[left] * m1 + yl[left]
+        # line connecting middle and right point (where applicable)
+        m2 = (yr[right] - ym[right]) / (xr[right] - xm[right])
+        b2 = -xr[right] * m2 + yr[right]
+        dx3l = (xm[left] ** 3 - xl[left] ** 3)
+        dx4l = (xm[left] ** 4 - xl[left] ** 4)
+        dx3r = (xr[right] ** 3 - xm[right] ** 3)
+        dx4r = (xr[right] ** 4 - xm[right] ** 4)
+        
+        # y^2
+        yy[left] = dx4l * (m1 - m3[left]) / 4 +\
+                   dx3l * (b1 - b3[left]) / 3
+        yy[right] += dx4r * (m2 - m3[right]) / 4 +\
+                     dx3r * (b2 - b3[right]) / 3
         yy[mid_below] *= -1
+        
         # find out which slices were going clockwise, and make those
         # negative        
         points = np.array([xys[0], xys[1]]).transpose()
