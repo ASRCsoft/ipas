@@ -4,7 +4,7 @@ A Python implementation of the [Ice Particle Aggregate Simulator](http://www.car
 ## Installation
 
 ```shell
-pip install git+https://github.com/ASRCsoft/ipas_python.git
+pip install git+https://github.com/ASRCsoft/ipas.git
 ```
 
 ## Crystals (monomers)
