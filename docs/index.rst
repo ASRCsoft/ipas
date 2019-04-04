@@ -8,19 +8,13 @@ ipas: the Ice Particle Aggregate Simulator
 
 ipas is a Python implementation of the Ice Particle Aggregate Simulator originally created by `Carl Schmitt <http://www.carlgschmitt.com/Microphysics.html>`_ in IDL.
 
-	     
-Installation
-============
-
-.. code-block:: console
-		
-   $ pip install git+https://github.com/ASRCsoft/ipas.git
-
 
 .. toctree::
    :maxdepth: 2
    :caption: Documentation
 
+   overview
+   installation
    getting-started
 	     
 
