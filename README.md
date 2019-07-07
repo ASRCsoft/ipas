@@ -1,4 +1,7 @@
 # ipas
+
+[![Documentation Status](https://readthedocs.org/projects/ipas/badge/?version=latest)](https://ipas.readthedocs.io/en/latest/?badge=latest)
+
 A Python implementation of the [Ice Particle Aggregate Simulator](http://www.carlgschmitt.com/Microphysics.html)
 
 ## Installation
