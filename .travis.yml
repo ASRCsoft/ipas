@@ -3,6 +3,5 @@ python:
   - "2.7"
   - "3.5"
   - "3.6"
-  - "pypy3.5"
 install: pip install .
 script: pytest
