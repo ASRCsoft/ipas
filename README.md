@@ -1,5 +1,6 @@
 # ipas
 
+[![Build Status](https://travis-ci.org/ASRCsoft/ipas.svg?branch=master)](https://travis-ci.org/ASRCsoft/ipas)
 [![Documentation Status](https://readthedocs.org/projects/ipas/badge/?version=latest)](https://ipas.readthedocs.io/en/latest/?badge=latest)
 
 A Python implementation of the [Ice Particle Aggregate Simulator](http://www.carlgschmitt.com/Microphysics.html)
